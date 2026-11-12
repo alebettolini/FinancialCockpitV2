@@ -4,40 +4,48 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- Segmented White 'C' Budget Arc (Perfectly Centered at 54,54 with R=25) -->
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M 26.02,54.09 A 26.0,26.0 0 0,1 51.09,29.02 L 51.39,37.51 A 17.5,17.5 0 0,0 34.51,54.39 Z" />
+        android:pathData="M 77.49,45.45 A 25.0,25.0 0 0,1 72.58,70.73 L 66.26,65.04 A 16.5,16.5 0 0,0 69.50,48.36 Z" />
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M 52.91,29.02 A 26.0,26.0 0 0,1 67.28,33.97 L 62.29,40.84 A 17.5,17.5 0 0,0 52.61,37.51 Z" />
+        android:pathData="M 71.68,71.68 A 25.0,25.0 0 0,1 46.69,77.91 L 49.18,69.78 A 16.5,16.5 0 0,0 65.67,65.67 Z" />
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M 33.30,73.06 A 26.0,26.0 0 0,1 26.02,55.91 L 34.51,55.61 A 17.5,17.5 0 0,0 39.41,67.16 Z" />
+        android:pathData="M 45.45,77.49 A 25.0,25.0 0 0,1 29.24,57.48 L 37.66,56.30 A 16.5,16.5 0 0,0 48.36,69.50 Z" />
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M 51.09,80.98 A 26.0,26.0 0 0,1 39.00,77.52 L 43.25,70.16 A 17.5,17.5 0 0,0 51.39,72.49 Z" />
+        android:pathData="M 29.10,56.18 A 25.0,25.0 0 0,1 40.38,33.03 L 45.01,40.16 A 16.5,16.5 0 0,0 37.56,55.44 Z" />
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M 75.37,66.40 A 26.0,26.0 0 0,1 52.91,80.98 L 52.61,72.49 A 17.5,17.5 0 0,0 67.73,62.67 Z" />
+        android:pathData="M 41.50,32.35 A 25.0,25.0 0 0,1 67.25,32.80 L 62.74,40.01 A 16.5,16.5 0 0,0 45.75,39.71 Z" />
+
+    <!-- Stacked Habit / Coin Bars (Left Column) -->
     <path
         android:fillColor="#FFF59E0B"
-        android:pathData="M 52.0,68.2 L 57.6,68.2 L 57.6,64.8 L 52.0,64.8 Z" />
+        android:pathData="M 46.0,66.0 L 51.0,66.0 L 51.0,60.0 L 46.0,60.0 Z" />
     <path
         android:fillColor="#FFFBBF24"
-        android:pathData="M 52.0,63.3 L 57.6,63.3 L 57.6,59.4 L 52.0,63.3 Z" />
+        android:pathData="M 46.0,58.0 L 51.0,58.0 L 51.0,50.0 L 46.0,50.0 Z" />
+
+    <!-- Stacked Habit / Coin Bars (Right Column) -->
     <path
         android:fillColor="#FFD97706"
-        android:pathData="M 59.4,68.2 L 65.2,68.2 L 65.2,64.8 L 59.4,64.8 Z" />
+        android:pathData="M 53.0,66.0 L 58.0,66.0 L 58.0,61.0 L 53.0,61.0 Z" />
     <path
         android:fillColor="#FFF59E0B"
-        android:pathData="M 59.4,63.3 L 65.2,63.3 L 65.2,59.9 L 59.4,59.9 Z" />
+        android:pathData="M 53.0,59.0 L 58.0,59.0 L 58.0,53.0 L 53.0,53.0 Z" />
     <path
         android:fillColor="#FFFAB301"
-        android:pathData="M 59.4,58.4 L 65.2,58.4 L 65.2,55.0 L 59.4,55.0 Z" />
+        android:pathData="M 53.0,51.0 L 58.0,51.0 L 58.0,46.0 L 53.0,46.0 Z" />
     <path
         android:fillColor="#FFFEC552"
-        android:pathData="M 59.4,53.5 L 65.2,53.5 L 65.2,48.6 L 59.4,53.5 Z" />
+        android:pathData="M 53.0,44.0 L 58.0,44.0 L 58.0,38.0 L 53.0,38.0 Z" />
+
+    <!-- Rising Amber-Gold Wealth Arrow breaking cleanly out of the C -->
     <path
         android:fillColor="#FFFAB301"
-        android:pathData="M 33.8,74.2 L 40.4,78.4 L 58.6,50.8 L 72.8,39.8 L 75.8,43.2 L 80.2,29.2 L 65.8,33.2 L 68.8,36.4 L 44.2,55.2 L 50.8,51.6 Z" />
+        android:pathData="M 33.0,63.0 L 37.0,68.0 L 63.0,43.0 L 73.0,33.0 L 76.0,36.0 L 81.0,24.0 L 69.0,28.0 L 72.0,31.0 L 41.0,57.0 Z" />
 </vector>
