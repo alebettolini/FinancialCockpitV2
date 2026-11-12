@@ -37,6 +37,7 @@ data class AccountSnapshotEntity(
     val statementDue: Double,
     val statementDueDate: String,
     val unbilledSpend: Double,
+    val ccSubTagsSummary: String = "",
     val cycleStartingPool: Double,
     val cycleLabel: String,
     val allocationMode: String
@@ -74,7 +75,7 @@ interface FinanceDao {
 
 @Database(
     entities = [TransactionEntity::class, VaultBalanceEntity::class, AccountSnapshotEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

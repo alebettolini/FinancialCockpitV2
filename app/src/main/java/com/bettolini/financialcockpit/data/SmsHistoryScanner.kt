@@ -39,7 +39,7 @@ object SmsHistoryScanner {
         ) ?: return@withContext 0
 
         var detectedDebitBalance = 6296.29
-        var detectedCreditAvlLimit = 33485.39
+        var detectedCreditAvlLimit = 33454.19
         var lastCreditLimitTimestamp = 0L
         var detectedStatementDue = 3620.45
         var detectedDueDate = "19 Nov"
@@ -170,12 +170,26 @@ object SmsHistoryScanner {
         val unbilledSpend = (creditTotalOwed - detectedStatementDue).coerceAtLeast(0.0)
         val trueUsableCash = (detectedDebitBalance - detectedStatementDue).coerceAtLeast(0.0)
 
-        // Reconstruct cycle starting pool from CHECKING debits only (never inflate with unbilled CC debt)
+        // Separate Cash (Checking 8691) spend from Credit Card (3445) spend in the current cycle
         val cycleAllSpendTxns = parsedTransactions.filter { it.isCurrentCycle && !it.isInternalTransfer }
-        val cycleCheckingSpendOnly = cycleAllSpendTxns.filter { !it.isCreditCard }.sumOf { it.amount }
-        val reconstructedCycleStartPool = trueUsableCash + cycleCheckingSpendOnly
+        val cycleCheckingTxns = cycleAllSpendTxns.filter { !it.isCreditCard }
+        val cycleCreditTxns = cycleAllSpendTxns.filter { it.isCreditCard }
+
+        // Summarize Credit Card sub-tags for the Skywards Signature card
+        val ccTagSummary = cycleCreditTxns
+            .groupBy { it.subTag }
+            .mapValues { entry -> entry.value.sumOf { it.amount } }
+            .entries
+            .sortedByDescending { it.value }
+            .take(4)
+            .joinToString("  •  ") { "${it.key}: AED ${String.format("%.0f", it.value)}" }
+
+        // Cash Vault Pool = True Usable Cash Today + Cycle Checking Debits
+        val cycleCheckingSpendTotal = cycleCheckingTxns.sumOf { it.amount }
+        val reconstructedCycleStartPool = trueUsableCash + cycleCheckingSpendTotal
 
         val baselineAlloc = DynamicAllocationEngine.calculateDynamicSplit(reconstructedCycleStartPool)
+        val vaultKeys = listOf("RENT", "FIXED_OVERHEAD", "SUSTENANCE_FLEET", "DISCRETIONARY", "TRAVEL", "WEALTH_SURPLUS")
         val vaultTargets = mapOf(
             "RENT" to baselineAlloc.rentVault,
             "FIXED_OVERHEAD" to baselineAlloc.fixedOverheadVault,
@@ -185,12 +199,39 @@ object SmsHistoryScanner {
             "WEALTH_SURPLUS" to baselineAlloc.wealthSurplusVault
         )
 
-        val updatedVaults = vaultTargets.map { (key, target) ->
-            val vaultTxns = cycleAllSpendTxns.filter { it.deducedVault == key }
-            val spent = vaultTxns.sumOf { it.amount }
-            val remaining = target - spent
+        // Deduct checking cash spend from each vault; absorb any checking overage from the largest positive vault so Net Cash Vaults == True Usable Cash
+        val rawRemaining = mutableMapOf<String, Double>()
+        for (key in vaultKeys) {
+            val target = vaultTargets[key] ?: 0.0
+            val spent = cycleCheckingTxns.filter { it.deducedVault == key }.sumOf { it.amount }
+            rawRemaining[key] = target - spent
+        }
 
-            val tagSummary = vaultTxns
+        val negativeTotal = rawRemaining.values.filter { it < 0.0 }.sumOf { -it }
+        if (negativeTotal > 0.0) {
+            for (key in vaultKeys) {
+                if ((rawRemaining[key] ?: 0.0) < 0.0) {
+                    rawRemaining[key] = 0.0
+                }
+            }
+            var toAbsorb = negativeTotal
+            for (key in vaultKeys.reversed()) {
+                val avail = rawRemaining[key] ?: 0.0
+                if (avail > 0.0 && toAbsorb > 0.0) {
+                    val absorb = minOf(avail, toAbsorb)
+                    rawRemaining[key] = avail - absorb
+                    toAbsorb -= absorb
+                }
+            }
+        }
+
+        val updatedVaults = vaultKeys.map { key ->
+            val target = vaultTargets[key] ?: 0.0
+            val vaultCashTxns = cycleCheckingTxns.filter { it.deducedVault == key }
+            val spent = vaultCashTxns.sumOf { it.amount }
+            val remaining = (rawRemaining[key] ?: 0.0).coerceAtLeast(0.0)
+
+            val tagSummary = vaultCashTxns
                 .groupBy { it.subTag }
                 .mapValues { entry -> entry.value.sumOf { it.amount } }
                 .entries
@@ -217,6 +258,7 @@ object SmsHistoryScanner {
                 statementDue = detectedStatementDue,
                 statementDueDate = detectedDueDate,
                 unbilledSpend = unbilledSpend,
+                ccSubTagsSummary = ccTagSummary,
                 cycleStartingPool = reconstructedCycleStartPool,
                 cycleLabel = cycleLabel,
                 allocationMode = baselineAlloc.allocationMode

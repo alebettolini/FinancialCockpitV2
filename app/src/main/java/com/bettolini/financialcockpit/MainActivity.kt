@@ -91,7 +91,8 @@ class MainActivity : ComponentActivity() {
                     val checkingCash = snapshot?.liveDebitBalance ?: 6296.29
                     val currentStatementDue = snapshot?.statementDue ?: 3620.45
                     val dueDateLabel = snapshot?.statementDueDate ?: "19 Nov"
-                    val unbilledVal = snapshot?.unbilledSpend ?: 4894.16
+                    val unbilledVal = snapshot?.unbilledSpend ?: 4925.36
+                    val ccTags = snapshot?.ccSubTagsSummary ?: ""
                     val totalCcOwed = snapshot?.creditTotalOwed ?: (currentStatementDue + unbilledVal)
                     val avlLimit = snapshot?.creditAvailableLimit ?: (42000.00 - totalCcOwed)
                     val cycleLabel = snapshot?.cycleLabel ?: "Cycle: 22 Oct – 21 Nov"
@@ -104,8 +105,6 @@ class MainActivity : ComponentActivity() {
                     val autoLoanEmi = 1594.00
                     val nextMonthCcCommitment = if (unbilledVal > 1000.0) 147.00 else unbilledVal
                     val projectedNextMonthBudget = (usableCashToday + expectedSalary - autoLoanEmi - nextMonthCcCommitment).coerceAtLeast(0.0)
-
-                    val totalVaultOverage = vaults.filter { it.currentRemaining < 0.0 }.sumOf { -it.currentRemaining }
 
                     LazyColumn(
                         modifier = Modifier
@@ -159,6 +158,7 @@ class MainActivity : ComponentActivity() {
 
                             Spacer(modifier = Modifier.height(18.dp))
 
+                            // 1. True Usable Cash Card
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(20.dp),
@@ -205,6 +205,7 @@ class MainActivity : ComponentActivity() {
 
                             Spacer(modifier = Modifier.height(14.dp))
 
+                            // 2. Credit Card Liability + CC Sub-Tag Breakdown
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(20.dp),
@@ -255,6 +256,16 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
 
+                                    if (ccTags.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Text(
+                                            text = "Cycle Card Spend: $ccTags",
+                                            fontSize = 11.sp,
+                                            color = Color(0xFFFF9F0A),
+                                            lineHeight = 15.sp
+                                        )
+                                    }
+
                                     Spacer(modifier = Modifier.height(14.dp))
                                     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF242426)))
                                     Spacer(modifier = Modifier.height(12.dp))
@@ -274,6 +285,7 @@ class MainActivity : ComponentActivity() {
 
                             Spacer(modifier = Modifier.height(16.dp))
 
+                            // 3. Reconciled Cash Vault Donut Card
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(20.dp),
@@ -285,7 +297,7 @@ class MainActivity : ComponentActivity() {
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Text(
-                                        text = "PAYDAY-ANCHORED VAULT LEDGER",
+                                        text = "USABLE CASH VAULT ALLOCATION",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         letterSpacing = 1.5.sp,
@@ -302,23 +314,6 @@ class MainActivity : ComponentActivity() {
                                     DonutChart(vaults = vaults, modifier = Modifier.size(180.dp))
                                     Spacer(modifier = Modifier.height(18.dp))
                                     DonutLegend(vaults = vaults)
-
-                                    if (totalVaultOverage > 0.0) {
-                                        Spacer(modifier = Modifier.height(14.dp))
-                                        Surface(
-                                            shape = RoundedCornerShape(10.dp),
-                                            color = Color(0xFF2C1618),
-                                            border = BorderStroke(1.dp, Color(0xFF5C2326))
-                                        ) {
-                                            Text(
-                                                text = "⚠ Total Lifestyle Spend Overage: AED ${String.format("%,.2f", totalVaultOverage)} above cycle cash targets",
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = Color(0xFFFF6961),
-                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                                            )
-                                        }
-                                    }
                                 }
                             }
 
@@ -380,7 +375,7 @@ class MainActivity : ComponentActivity() {
                             Spacer(modifier = Modifier.height(20.dp))
 
                             Text(
-                                text = "VAULT LEDGER & #SUBTAGS",
+                                text = "CASH VAULT LEDGER & #SUBTAGS",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 1.sp,
@@ -434,7 +429,6 @@ fun getVaultColor(key: String): Color {
 fun DonutChart(vaults: List<VaultBalanceEntity>, modifier: Modifier = Modifier) {
     val positiveVaults = vaults.filter { it.currentRemaining > 0.0 }
     val totalPositive = positiveVaults.sumOf { it.currentRemaining }.toFloat()
-    val netVaultTotal = vaults.sumOf { it.currentRemaining }.toFloat()
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -475,13 +469,13 @@ fun DonutChart(vaults: List<VaultBalanceEntity>, modifier: Modifier = Modifier) 
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = "AED ${String.format("%.0f", netVaultTotal)}",
-                fontSize = 18.sp,
+                text = "AED ${String.format("%,.2f", totalPositive)}",
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Black,
                 color = Color.White
             )
             Text(
-                text = "NET VAULTS",
+                text = "USABLE CASH",
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFF8E8E93),
@@ -520,7 +514,6 @@ fun DonutLegend(vaults: List<VaultBalanceEntity>) {
 
 @Composable
 fun VaultItemCard(vault: VaultBalanceEntity) {
-    val isOverspent = vault.currentRemaining < 0.0
     val progress = if (vault.allocatedAmount > 0) (vault.currentRemaining / vault.allocatedAmount).toFloat() else 0f
     val animatedProgress by animateFloatAsState(
         targetValue = progress.coerceIn(0f, 1f),
@@ -531,8 +524,8 @@ fun VaultItemCard(vault: VaultBalanceEntity) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = if (isOverspent) Color(0xFF1E1416) else Color(0xFF161618)),
-        border = BorderStroke(1.dp, if (isOverspent) Color(0xFF4A1E22) else Color(0xFF242426))
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF161618)),
+        border = BorderStroke(1.dp, Color(0xFF242426))
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Row(
@@ -556,10 +549,10 @@ fun VaultItemCard(vault: VaultBalanceEntity) {
                 }
 
                 Text(
-                    text = if (isOverspent) "-AED ${String.format("%,.2f", -vault.currentRemaining)}" else "AED ${String.format("%,.2f", vault.currentRemaining)}",
+                    text = "AED ${String.format("%,.2f", vault.currentRemaining)}",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Black,
-                    color = if (isOverspent) Color(0xFFFF453A) else if (vault.currentRemaining > 0) Color.White else Color(0xFF8E8E93)
+                    color = if (vault.currentRemaining > 0) Color.White else Color(0xFF8E8E93)
                 )
             }
 
@@ -568,7 +561,7 @@ fun VaultItemCard(vault: VaultBalanceEntity) {
             LinearProgressIndicator(
                 progress = { animatedProgress },
                 modifier = Modifier.fillMaxWidth().height(6.dp),
-                color = if (isOverspent) Color(0xFFFF453A) else getVaultColor(vault.vaultKey),
+                color = getVaultColor(vault.vaultKey),
                 trackColor = Color(0xFF242426),
                 strokeCap = StrokeCap.Round
             )
@@ -580,15 +573,15 @@ fun VaultItemCard(vault: VaultBalanceEntity) {
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = "Cycle Target: AED ${String.format("%.0f", vault.allocatedAmount)}  •  Spent: AED ${String.format("%.0f", vault.spentAmount)}",
+                    text = "Cash Target: AED ${String.format("%.0f", vault.allocatedAmount)}  •  Cash Spent: AED ${String.format("%.0f", vault.spentAmount)}",
                     fontSize = 11.sp,
                     color = Color(0xFF8E8E93)
                 )
                 Text(
-                    text = if (isOverspent) "OVER" else "${(progress * 100).toInt()}% left",
+                    text = "${(progress * 100).toInt()}% left",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (isOverspent) Color(0xFFFF453A) else Color(0xFFD1D1D6)
+                    color = Color(0xFFD1D1D6)
                 )
             }
 

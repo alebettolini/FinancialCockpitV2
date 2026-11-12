@@ -123,11 +123,11 @@ object MerchantClassifier {
             subTag = "#Dining"
         ),
 
-        // 8. Discretionary: Online Retail & Home
+        // 8. Discretionary: Online Retail & Home (no bare "ACE" substring!)
         Rule(
             keywords = listOf(
                 "AMAZON", "NOON", "TABBY", "TAMARA", "ALIEXPRESS", "TEMU", "SHEIN",
-                "NAMSHI", "OUNASS", "IKEA", "PAN HOME", "HOME CENTRE", "ACE", "DANUBE",
+                "NAMSHI", "OUNASS", "IKEA", "PAN HOME", "HOME CENTRE", "ACE HARDWARE", "DANUBE",
                 "VIRGIN MEGASTORE", "SHARAF DG", "JUMBO", "EMAX", "ZARA", "H&M", "UNIQLO"
             ),
             vaultKey = "DISCRETIONARY",
@@ -146,10 +146,10 @@ object MerchantClassifier {
 
         val upperMerchant = cleanedName.uppercase()
 
-        // 1. Strict Checking-Only Institutional Debits (prevents CC "EMI" footers from matching #Auto Loan)
+        // 1. Strict Checking-Only Institutional Debits (immune to CC "0% EMI" promotional footers)
         if (!isCreditCard) {
-            if (upperSms.contains("PL-AC") || upperSms.contains("AUTO LOAN") || upperSms.contains("CAR LOAN")) {
-                return ClassificationResult("FIXED_OVERHEAD", "#Auto Loan", "ENBD Auto Loan (Corvette)")
+            if (upperSms.contains("PL-AC") || upperSms.contains("LOAN") || upperSms.contains("FINANCE")) {
+                return ClassificationResult("FIXED_OVERHEAD", "#Auto Loan", "ENBD Auto Loan")
             }
             if (upperSms.contains("ATM") || upperSms.contains("CASH WITHDRAWAL")) {
                 return ClassificationResult("DISCRETIONARY", "#ATM Cash", "ATM Cash Withdrawal")
@@ -159,7 +159,7 @@ object MerchantClassifier {
             }
         }
 
-        // 2. Match primarily against the Merchant Name (ignoring SMS promotional footers)
+        // 2. Match against Merchant Name
         for (rule in merchantRules) {
             if (rule.keywords.any { keyword -> upperMerchant.contains(keyword) }) {
                 return ClassificationResult(
