@@ -67,8 +67,8 @@ class MainActivity : ComponentActivity() {
             var themeMode by remember {
                 mutableStateOf(prefs.getString("theme_mode", "SYSTEM") ?: "SYSTEM")
             }
-            var widgetMono by remember {
-                mutableStateOf(prefs.getBoolean("widget_mono", false))
+            var widgetStyle by remember {
+                mutableStateOf(prefs.getString("widget_style", "BRAND") ?: "BRAND")
             }
             val systemDark = isSystemInDarkTheme()
             val isDark = when (themeMode) {
@@ -167,22 +167,31 @@ class MainActivity : ComponentActivity() {
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        // Widget Color/Mono Pill
+                                        // Widget Style Pill (Brand -> System -> Mono)
                                         Surface(
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(12.dp))
                                                 .clickable {
-                                                    val nextMono = !widgetMono
-                                                    widgetMono = nextMono
-                                                    prefs.edit().putBoolean("widget_mono", nextMono).apply()
+                                                    val nextStyle = when (widgetStyle) {
+                                                        "BRAND" -> "SYSTEM"
+                                                        "SYSTEM" -> "MONO"
+                                                        else -> "BRAND"
+                                                    }
+                                                    widgetStyle = nextStyle
+                                                    prefs.edit().putString("widget_style", nextStyle).apply()
                                                     coroutineScope.launch { CockpitWidget().updateAll(context) }
                                                 },
                                             shape = RoundedCornerShape(12.dp),
                                             color = palette.surface,
                                             border = BorderStroke(1.dp, palette.border)
                                         ) {
+                                            val styleLabel = when (widgetStyle) {
+                                                "SYSTEM" -> "◈ System"
+                                                "MONO" -> "◈ Mono"
+                                                else -> "◈ Brand"
+                                            }
                                             Text(
-                                                text = if (widgetMono) "◈ Mono" else "◈ Color",
+                                                text = styleLabel,
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = palette.textPrimary,
