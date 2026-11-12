@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Cadence</string>
+    <string name="widget_description">Cadence</string>
 </resources>
