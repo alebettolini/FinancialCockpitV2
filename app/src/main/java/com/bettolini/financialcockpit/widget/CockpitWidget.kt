@@ -14,6 +14,7 @@ import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
+import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.LinearProgressIndicator
 import androidx.glance.appwidget.SizeMode
@@ -21,7 +22,6 @@ import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
-import androidx.glance.appwidget.updateAll
 import androidx.glance.background
 import androidx.glance.layout.*
 import androidx.glance.text.FontWeight
@@ -47,7 +47,7 @@ class RefreshCockpitAction : ActionCallback {
             SmsHistoryScanner.scanAndSyncInbox(context.applicationContext)
         } catch (_: Exception) {
         }
-        CockpitWidget().updateAll(context)
+        CockpitWidget.forceUpdateAll(context)
     }
 }
 
@@ -156,213 +156,16 @@ class CockpitWidget : GlanceAppWidget() {
 
     override val sizeMode: SizeMode = SizeMode.Exact
 
-    override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val dao = AppDatabase.getInstance(context).financeDao()
-        val snapshot = dao.getSnapshotSync()
-        val vaults = dao.getAllVaultsSync()
-
-        val prefs = context.getSharedPreferences("cockpit_ui_prefs", Context.MODE_PRIVATE)
-        val themeMode = prefs.getString("theme_mode", "SYSTEM") ?: "SYSTEM"
-        val widgetStyle = prefs.getString("widget_style", "BRAND") ?: "BRAND"
-
-        val nightFlags = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        val systemDark = nightFlags == Configuration.UI_MODE_NIGHT_YES
-        val isDark = when (themeMode) {
-            "DARK" -> true
-            "LIGHT" -> false
-            else -> systemDark
-        }
-
-        provideContent {
-            GlanceTheme {
-                val tokens = rememberWidgetTokens(widgetStyle = widgetStyle, isDark = isDark)
-                CockpitWidgetContent(snapshot = snapshot, vaults = vaults, palette = tokens)
+    companion object {
+        suspend fun forceUpdateAll(context: Context) {
+            val appCtx = context.applicationContext
+            val manager = GlanceAppWidgetManager(appCtx)
+            val ids = manager.getGlanceIds(CockpitWidget::class.java)
+            ids.forEach { glanceId ->
+                CockpitWidget().update(appCtx, glanceId)
             }
         }
     }
-}
-
-private fun vaultDisplayName(key: String): String = when (key) {
-    "SUSTENANCE_FLEET" -> "Sustenance & Fleet"
-    "FIXED_OVERHEAD" -> "Fixed Overhead"
-    "DISCRETIONARY" -> "Discretionary"
-    "WEALTH_SURPLUS" -> "Wealth Surplus"
-    "TRAVEL" -> "Travel"
-    "RENT" -> "Rent"
-    else -> key.replace("_", " ")
-}
-
-private fun vaultShortName(key: String): String = when (key) {
-    "SUSTENANCE_FLEET" -> "Sustenance"
-    "FIXED_OVERHEAD" -> "Overhead"
-    "DISCRETIONARY" -> "Discretionary"
-    "WEALTH_SURPLUS" -> "Surplus"
-    "TRAVEL" -> "Travel
-cat << 'EOF' > apply_widget_update.sh
-#!/bin/bash
-set -e
-
-rm -f sync_widget_palette.sh fix_widget_3x1_and_system_theme.sh
-
-echo "1. Writing CockpitWidget.kt with dedicated 3x1 layout and Brand/System/Mono styles..."
-cat << 'INNER_EOF' > app/src/main/java/com/bettolini/financialcockpit/widget/CockpitWidget.kt
-package com.bettolini.financialcockpit.widget
-
-import android.content.Context
-import android.content.res.Configuration
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.glance.GlanceId
-import androidx.glance.GlanceModifier
-import androidx.glance.GlanceTheme
-import androidx.glance.LocalSize
-import androidx.glance.action.ActionParameters
-import androidx.glance.action.actionStartActivity
-import androidx.glance.action.clickable
-import androidx.glance.appwidget.GlanceAppWidget
-import androidx.glance.appwidget.GlanceAppWidgetReceiver
-import androidx.glance.appwidget.LinearProgressIndicator
-import androidx.glance.appwidget.SizeMode
-import androidx.glance.appwidget.action.ActionCallback
-import androidx.glance.appwidget.action.actionRunCallback
-import androidx.glance.appwidget.cornerRadius
-import androidx.glance.appwidget.provideContent
-import androidx.glance.appwidget.updateAll
-import androidx.glance.background
-import androidx.glance.layout.*
-import androidx.glance.text.FontWeight
-import androidx.glance.text.Text
-import androidx.glance.text.TextStyle
-import androidx.glance.unit.ColorProvider
-import com.bettolini.financialcockpit.MainActivity
-import com.bettolini.financialcockpit.data.AccountSnapshotEntity
-import com.bettolini.financialcockpit.data.AppDatabase
-import com.bettolini.financialcockpit.data.SmsHistoryScanner
-import com.bettolini.financialcockpit.data.VaultBalanceEntity
-import com.bettolini.financialcockpit.domain.DynamicAllocationEngine
-import java.time.LocalDate
-import java.time.temporal.ChronoUnit
-
-class RefreshCockpitAction : ActionCallback {
-    override suspend fun onAction(
-        context: Context,
-        glanceId: GlanceId,
-        parameters: ActionParameters
-    ) {
-        try {
-            SmsHistoryScanner.scanAndSyncInbox(context.applicationContext)
-        } catch (_: Exception) {
-        }
-        CockpitWidget().updateAll(context)
-    }
-}
-
-private data class WidgetColorTokens(
-    val surface: ColorProvider,
-    val surfaceMuted: ColorProvider,
-    val textPrimary: ColorProvider,
-    val textSecondary: ColorProvider,
-    val heroAccent: ColorProvider,
-    val syncBg: ColorProvider,
-    val syncFg: ColorProvider,
-    val sustenanceBar: ColorProvider,
-    val overheadBar: ColorProvider,
-    val discretionaryBar: ColorProvider,
-    val cardLimitBar: ColorProvider,
-    val ccPaidFg: ColorProvider,
-    val ccAlertFg: ColorProvider
-)
-
-@Composable
-private fun rememberWidgetTokens(widgetStyle: String, isDark: Boolean): WidgetColorTokens {
-    if (widgetStyle == "SYSTEM") {
-        return WidgetColorTokens(
-            surface = GlanceTheme.colors.surface,
-            surfaceMuted = GlanceTheme.colors.surfaceVariant,
-            textPrimary = GlanceTheme.colors.onSurface,
-            textSecondary = GlanceTheme.colors.onSurfaceVariant,
-            heroAccent = GlanceTheme.colors.primary,
-            syncBg = GlanceTheme.colors.secondaryContainer,
-            syncFg = GlanceTheme.colors.onSecondaryContainer,
-            sustenanceBar = GlanceTheme.colors.primary,
-            overheadBar = GlanceTheme.colors.tertiary,
-            discretionaryBar = GlanceTheme.colors.secondary,
-            cardLimitBar = GlanceTheme.colors.tertiary,
-            ccPaidFg = GlanceTheme.colors.primary,
-            ccAlertFg = GlanceTheme.colors.tertiary
-        )
-    }
-
-    val isMono = widgetStyle == "MONO"
-    return when {
-        isMono && isDark -> WidgetColorTokens(
-            surface = ColorProvider(Color(0xFF1A1A1D)),
-            surfaceMuted = ColorProvider(Color(0xFF2C2C30)),
-            textPrimary = ColorProvider(Color(0xFFF2F2F7)),
-            textSecondary = ColorProvider(Color(0xFF9E9EA4)),
-            heroAccent = ColorProvider(Color(0xFFFFFFFF)),
-            syncBg = ColorProvider(Color(0xFF2C2C30)),
-            syncFg = ColorProvider(Color(0xFFE5E5EA)),
-            sustenanceBar = ColorProvider(Color(0xFFD1D1D6)),
-            overheadBar = ColorProvider(Color(0xFF8E8E93)),
-            discretionaryBar = ColorProvider(Color(0xFF636366)),
-            cardLimitBar = ColorProvider(Color(0xFFAEAEB2)),
-            ccPaidFg = ColorProvider(Color(0xFFD1D1D6)),
-            ccAlertFg = ColorProvider(Color(0xFFAEAEB2))
-        )
-        isMono && !isDark -> WidgetColorTokens(
-            surface = ColorProvider(Color(0xFFF3F4F6)),
-            surfaceMuted = ColorProvider(Color(0xFFDCDFE4)),
-            textPrimary = ColorProvider(Color(0xFF1C1C1E)),
-            textSecondary = ColorProvider(Color(0xFF636366)),
-            heroAccent = ColorProvider(Color(0xFF1C1C1E)),
-            syncBg = ColorProvider(Color(0xFFE2E4E9)),
-            syncFg = ColorProvider(Color(0xFF1C1C1E)),
-            sustenanceBar = ColorProvider(Color(0xFF3A3A3C)),
-            overheadBar = ColorProvider(Color(0xFF636366)),
-            discretionaryBar = ColorProvider(Color(0xFF8E8E93)),
-            cardLimitBar = ColorProvider(Color(0xFF48484A)),
-            ccPaidFg = ColorProvider(Color(0xFF2C2C2E)),
-            ccAlertFg = ColorProvider(Color(0xFF48484A))
-        )
-        isDark -> WidgetColorTokens(
-            surface = ColorProvider(Color(0xFF171229)),
-            surfaceMuted = ColorProvider(Color(0xFF261E42)),
-            textPrimary = ColorProvider(Color(0xFFF5F3FC)),
-            textSecondary = ColorProvider(Color(0xFF9C93BA)),
-            heroAccent = ColorProvider(Color(0xFFB57EE8)),
-            syncBg = ColorProvider(Color(0xFF2A1F4D)),
-            syncFg = ColorProvider(Color(0xFFD7B5FA)),
-            sustenanceBar = ColorProvider(Color(0xFF9F5CE0)),
-            overheadBar = ColorProvider(Color(0xFFFAB301)),
-            discretionaryBar = ColorProvider(Color(0xFFD177B5)),
-            cardLimitBar = ColorProvider(Color(0xFFFF8601)),
-            ccPaidFg = ColorProvider(Color(0xFF2EE58F)),
-            ccAlertFg = ColorProvider(Color(0xFFFFB429))
-        )
-        else -> WidgetColorTokens(
-            surface = ColorProvider(Color(0xFFEEF7FF)),
-            surfaceMuted = ColorProvider(Color(0xFFD6E6F7)),
-            textPrimary = ColorProvider(Color(0xFF19132E)),
-            textSecondary = ColorProvider(Color(0xFF625B7A)),
-            heroAccent = ColorProvider(Color(0xFF6D35A3)),
-            syncBg = ColorProvider(Color(0xFFE3D5F5)),
-            syncFg = ColorProvider(Color(0xFF5D2A91)),
-            sustenanceBar = ColorProvider(Color(0xFF8B4ABE)),
-            overheadBar = ColorProvider(Color(0xFFFAB301)),
-            discretionaryBar = ColorProvider(Color(0xFFA85990)),
-            cardLimitBar = ColorProvider(Color(0xFFFF8601)),
-            ccPaidFg = ColorProvider(Color(0xFF12945A)),
-            ccAlertFg = ColorProvider(Color(0xFFE58200))
-        )
-    }
-}
-
-class CockpitWidget : GlanceAppWidget() {
-
-    override val sizeMode: SizeMode = SizeMode.Exact
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val dao = AppDatabase.getInstance(context).financeDao()

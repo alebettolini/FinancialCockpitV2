@@ -14,7 +14,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -38,7 +37,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.glance.appwidget.updateAll
 import com.bettolini.financialcockpit.data.AppDatabase
 import com.bettolini.financialcockpit.data.SmsHistoryScanner
 import com.bettolini.financialcockpit.data.TransactionEntity
@@ -63,13 +61,13 @@ class MainActivity : ComponentActivity() {
             val context = LocalContext.current
             val coroutineScope = rememberCoroutineScope()
 
-            // Theme preference: "SYSTEM", "LIGHT", "DARK"
             var themeMode by remember {
                 mutableStateOf(prefs.getString("theme_mode", "SYSTEM") ?: "SYSTEM")
             }
             var widgetStyle by remember {
                 mutableStateOf(prefs.getString("widget_style", "BRAND") ?: "BRAND")
             }
+
             val systemDark = isSystemInDarkTheme()
             val isDark = when (themeMode) {
                 "DARK" -> true
@@ -91,7 +89,7 @@ class MainActivity : ComponentActivity() {
                 if (hasSmsPermission) {
                     coroutineScope.launch {
                         val count = SmsHistoryScanner.scanAndSyncInbox(context)
-                        CockpitWidget().updateAll(context)
+                        CockpitWidget.forceUpdateAll(context)
                         Toast.makeText(context, "Synced $count ENBD alerts", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -141,7 +139,7 @@ class MainActivity : ComponentActivity() {
                             contentPadding = PaddingValues(top = 20.dp, bottom = 32.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            // 1. Minimalist Top Bar (Title + Theme Toggle + Sync)
+                            // 1. Minimalist Top Bar
                             item {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -164,7 +162,7 @@ class MainActivity : ComponentActivity() {
                                     }
 
                                     Row(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         // Widget Style Pill (Brand -> System -> Mono)
@@ -178,8 +176,11 @@ class MainActivity : ComponentActivity() {
                                                         else -> "BRAND"
                                                     }
                                                     widgetStyle = nextStyle
-                                                    prefs.edit().putString("widget_style", nextStyle).apply()
-                                                    coroutineScope.launch { CockpitWidget().updateAll(context) }
+                                                    prefs.edit().putString("widget_style", nextStyle).commit()
+                                                    coroutineScope.launch {
+                                                        CockpitWidget.forceUpdateAll(context)
+                                                        Toast.makeText(context, "Widget: $nextStyle", Toast.LENGTH_SHORT).show()
+                                                    }
                                                 },
                                             shape = RoundedCornerShape(12.dp),
                                             color = palette.surface,
@@ -210,8 +211,10 @@ class MainActivity : ComponentActivity() {
                                                         else -> "SYSTEM"
                                                     }
                                                     themeMode = next
-                                                    prefs.edit().putString("theme_mode", next).apply()
-                                                    coroutineScope.launch { CockpitWidget().updateAll(context) }
+                                                    prefs.edit().putString("theme_mode", next).commit()
+                                                    coroutineScope.launch {
+                                                        CockpitWidget.forceUpdateAll(context)
+                                                    }
                                                 },
                                             shape = RoundedCornerShape(12.dp),
                                             color = palette.surface,
@@ -224,10 +227,10 @@ class MainActivity : ComponentActivity() {
                                             }
                                             Text(
                                                 text = modeLabel,
-                                                fontSize = 12.sp,
+                                                fontSize = 11.sp,
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = palette.textPrimary,
-                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp)
                                             )
                                         }
 
@@ -240,7 +243,7 @@ class MainActivity : ComponentActivity() {
                                                     if (hasSmsPermission) {
                                                         coroutineScope.launch {
                                                             val count = SmsHistoryScanner.scanAndSyncInbox(context)
-                                                            CockpitWidget().updateAll(context)
+                                                            CockpitWidget.forceUpdateAll(context)
                                                             Toast.makeText(context, "Synced $count alerts", Toast.LENGTH_SHORT).show()
                                                         }
                                                     } else {
@@ -254,10 +257,10 @@ class MainActivity : ComponentActivity() {
                                         ) {
                                             Text(
                                                 text = "↻ Sync",
-                                                fontSize = 12.sp,
+                                                fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color.White,
-                                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)
                                             )
                                         }
                                     }
@@ -371,7 +374,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
 
-                            // 3. Skywards Signature Card (Clean Minimalist Surface + Amber Accent)
+                            // 3. Skywards Signature Card
                             item {
                                 Surface(
                                     modifier = Modifier.fillMaxWidth(),
@@ -446,7 +449,6 @@ class MainActivity : ComponentActivity() {
 
                                         Spacer(modifier = Modifier.height(12.dp))
 
-                                        // Subtle Credit Utilization Bar
                                         val ccProgress = (totalCcOwed / ccLimit).toFloat().coerceIn(0f, 1f)
                                         Box(
                                             modifier = Modifier
@@ -806,7 +808,6 @@ fun VaultItemCard(vault: VaultBalanceEntity) {
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Gradient Progress Pill
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
