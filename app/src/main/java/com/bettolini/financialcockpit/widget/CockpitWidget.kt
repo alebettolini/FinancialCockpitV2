@@ -95,19 +95,42 @@ private fun vaultBarColor(key: String): Color = when (key) {
 }
 
 @Composable
+private fun SyncPill(compact: Boolean = false) {
+    Box(
+        modifier = GlanceModifier
+            .background(ColorProvider(Color(0xFF1E1E22)))
+            .cornerRadius(8.dp)
+            .padding(
+                horizontal = if (compact) 7.dp else 8.dp,
+                vertical = if (compact) 5.dp else 3.dp
+            )
+            .clickable(actionRunCallback<RefreshCockpitAction>()),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = if (compact) "↻" else "↻ Sync",
+            style = TextStyle(
+                color = ColorProvider(Color(0xFF00E676)),
+                fontSize = if (compact) 13.sp else 10.sp,
+                fontWeight = FontWeight.Bold
+            ),
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
 private fun CockpitWidgetContent(
     snapshot: AccountSnapshotEntity?,
     vaults: List<VaultBalanceEntity>
 ) {
     val size = LocalSize.current
-    val isCompact = size.height < 115.dp
-    val isExpanded = size.height >= 205.dp
-    val isNarrow = size.width < 235.dp
+    val isNarrow = size.width < 225.dp
+    val isShort = size.height < 115.dp
+    val isTall = size.height >= 235.dp
 
     val today = LocalDate.now()
-    val cycleStart = SmsHistoryScanner.getCurrentCycleStart(today)
     val payday = if (today.dayOfMonth < 22) today.withDayOfMonth(22) else today.plusMonths(1).withDayOfMonth(22)
-    val totalCycleDays = ChronoUnit.DAYS.between(cycleStart, payday).coerceAtLeast(1)
     val daysLeft = ChronoUnit.DAYS.between(today, payday).coerceAtLeast(1)
 
     val checking = snapshot?.liveDebitBalance ?: 2737.93
@@ -129,337 +152,371 @@ private fun CockpitWidgetContent(
         else -> Color(0xFFFF9F0A)
     }
 
-    // Order vaults by priority: Sustenance & Fleet first, then Fixed Overhead, then remaining funded vaults
     val priorityOrder = listOf("SUSTENANCE_FLEET", "FIXED_OVERHEAD", "DISCRETIONARY", "TRAVEL", "WEALTH_SURPLUS", "RENT")
     val activeVaults = priorityOrder
         .mapNotNull { key -> vaults.find { it.vaultKey == key } }
         .filter { it.allocatedAmount > 0.0 || it.currentRemaining > 0.0 }
 
-    if (isCompact) {
-        // 1-ROW COMPACT BAR (e.g. 4x1 or 3x1) - Zero vertical clipping
-        Row(
-            modifier = GlanceModifier
-                .fillMaxSize()
-                .background(ColorProvider(Color(0xFF121214)))
-                .cornerRadius(16.dp)
-                .padding(horizontal = 14.dp, vertical = 8.dp)
-                .clickable(actionStartActivity<MainActivity>()),
-            verticalAlignment = Alignment.Vertical.CenterVertically
-        ) {
-            Column(modifier = GlanceModifier.defaultWeight()) {
-                Text(
-                    text = "AED ${String.format("%,.0f", usableCash)}",
-                    style = TextStyle(
-                        color = ColorProvider(Color(0xFF00E676)),
-                        fontSize = 19.sp,
-                        fontWeight = FontWeight.Bold
-                    ),
-                    maxLines = 1
-                )
-                val statusSub = if (billedDue <= 0.01) {
-                    "${daysLeft}d left • CC Paid ✓"
-                } else {
-                    "${daysLeft}d left • Due ${String.format("%,.0f", billedDue)}"
-                }
-                Text(
-                    text = statusSub,
-                    style = TextStyle(
-                        color = ColorProvider(Color(0xFF8E8E93)),
-                        fontSize = 10.sp
-                    ),
-                    maxLines = 1
-                )
-            }
-
-            Column(
-                horizontalAlignment = Alignment.Horizontal.End,
-                modifier = GlanceModifier.padding(end = 10.dp)
-            ) {
-                Text(
-                    text = "AED ${String.format("%.0f", dailySafe)}/d",
-                    style = TextStyle(
-                        color = ColorProvider(Color.White),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    ),
-                    maxLines = 1
-                )
-                Text(
-                    text = "Card: ${String.format("%,.0f", unbilled)}",
-                    style = TextStyle(
-                        color = ColorProvider(Color(0xFFFF453A)),
-                        fontSize = 10.sp
-                    ),
-                    maxLines = 1
-                )
-            }
-
-            Box(
+    when {
+        // 1. TINY SQUARE (e.g. 2x1): Priority #1 (Usable Cash + Daily Pace stacked vertically so nothing clips)
+        isNarrow && isShort -> {
+            Row(
                 modifier = GlanceModifier
-                    .background(ColorProvider(Color(0xFF1E1E22)))
-                    .cornerRadius(10.dp)
-                    .padding(horizontal = 9.dp, vertical = 7.dp)
-                    .clickable(actionRunCallback<RefreshCockpitAction>()),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "↻",
-                    style = TextStyle(
-                        color = ColorProvider(Color(0xFF00E676)),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    ),
-                    maxLines = 1
-                )
-            }
-        }
-    } else {
-        // STANDARD (2-ROW) & EXPANDED (3+ ROW) VISUAL COCKPIT
-        Column(
-            modifier = GlanceModifier
-                .fillMaxSize()
-                .background(ColorProvider(Color(0xFF121214)))
-                .cornerRadius(18.dp)
-                .padding(14.dp)
-                .clickable(actionStartActivity<MainActivity>())
-        ) {
-            // 1. Header Row: Live Mode Badge + Sync Button
-            Row(
-                modifier = GlanceModifier.fillMaxWidth(),
+                    .fillMaxSize()
+                    .background(ColorProvider(Color(0xFF121214)))
+                    .cornerRadius(16.dp)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .clickable(actionStartActivity<MainActivity>()),
                 verticalAlignment = Alignment.Vertical.CenterVertically
-            ) {
-                Text(
-                    text = "● ${activeMode.first}",
-                    style = TextStyle(
-                        color = ColorProvider(modeColor),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    ),
-                    maxLines = 1,
-                    modifier = GlanceModifier.defaultWeight()
-                )
-                Box(
-                    modifier = GlanceModifier
-                        .background(ColorProvider(Color(0xFF1E1E22)))
-                        .cornerRadius(8.dp)
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                        .clickable(actionRunCallback<RefreshCockpitAction>()),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "↻ Sync",
-                        style = TextStyle(
-                            color = ColorProvider(Color(0xFF00E676)),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        maxLines = 1
-                    )
-                }
-            }
-
-            Spacer(modifier = GlanceModifier.height(6.dp))
-
-            // 2. Hero Balance & Safe Daily Spend (single-line locked so AED never wraps)
-            Row(
-                modifier = GlanceModifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Vertical.Bottom
             ) {
                 Column(modifier = GlanceModifier.defaultWeight()) {
                     Text(
                         text = "AED ${String.format("%,.0f", usableCash)}",
                         style = TextStyle(
                             color = ColorProvider(Color(0xFF00E676)),
-                            fontSize = if (isNarrow) 20.sp else 24.sp,
+                            fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
                         ),
                         maxLines = 1
                     )
-                    Text(
-                        text = "Usable Cash • ${daysLeft}d to 22nd",
-                        style = TextStyle(
-                            color = ColorProvider(Color(0xFF8E8E93)),
-                            fontSize = 10.sp
-                        ),
-                        maxLines = 1
-                    )
-                }
-
-                Column(horizontalAlignment = Alignment.Horizontal.End) {
                     Text(
                         text = "AED ${String.format("%.0f", dailySafe)}/day",
                         style = TextStyle(
                             color = ColorProvider(Color.White),
-                            fontSize = if (isNarrow) 13.sp else 15.sp,
-                            fontWeight = FontWeight.Bold
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
                         ),
+                        maxLines = 1
+                    )
+                }
+                SyncPill(compact = true)
+            }
+        }
+
+        // 2. NARROW TALL (e.g. 2x2 or 2x3): Vertical single-column stack (zero horizontal crowding)
+        isNarrow && !isShort -> {
+            Column(
+                modifier = GlanceModifier
+                    .fillMaxSize()
+                    .background(ColorProvider(Color(0xFF121214)))
+                    .cornerRadius(18.dp)
+                    .padding(12.dp)
+                    .clickable(actionStartActivity<MainActivity>())
+            ) {
+                Row(
+                    modifier = GlanceModifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Vertical.CenterVertically
+                ) {
+                    Text(
+                        text = "●",
+                        style = TextStyle(color = ColorProvider(modeColor), fontSize = 12.sp, fontWeight = FontWeight.Bold),
+                        modifier = GlanceModifier.defaultWeight()
+                    )
+                    SyncPill(compact = true)
+                }
+
+                Spacer(modifier = GlanceModifier.height(4.dp))
+
+                Text(
+                    text = "USABLE CASH",
+                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                    maxLines = 1
+                )
+                Text(
+                    text = "AED ${String.format("%,.0f", usableCash)}",
+                    style = TextStyle(color = ColorProvider(Color(0xFF00E676)), fontSize = 21.sp, fontWeight = FontWeight.Bold),
+                    maxLines = 1
+                )
+
+                Spacer(modifier = GlanceModifier.height(6.dp))
+
+                Text(
+                    text = "DAILY PACE (${daysLeft}D)",
+                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                    maxLines = 1
+                )
+                Text(
+                    text = "AED ${String.format("%.0f", dailySafe)}/day",
+                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 15.sp, fontWeight = FontWeight.Bold),
+                    maxLines = 1
+                )
+
+                if (size.height >= 175.dp && activeVaults.isNotEmpty()) {
+                    Spacer(modifier = GlanceModifier.defaultWeight())
+                    activeVaults.take(2).forEach { vault ->
+                        val frac = if (vault.allocatedAmount > 0.0) (vault.currentRemaining / vault.allocatedAmount).toFloat().coerceIn(0f, 1f) else 0f
+                        Column(modifier = GlanceModifier.fillMaxWidth().padding(top = 6.dp)) {
+                            Row(modifier = GlanceModifier.fillMaxWidth()) {
+                                Text(
+                                    text = vaultShortName(vault.vaultKey),
+                                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 9.sp, fontWeight = FontWeight.Medium),
+                                    maxLines = 1,
+                                    modifier = GlanceModifier.defaultWeight()
+                                )
+                                Text(
+                                    text = "${String.format("%,.0f", vault.currentRemaining)}",
+                                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                    maxLines = 1
+                                )
+                            }
+                            Spacer(modifier = GlanceModifier.height(2.dp))
+                            LinearProgressIndicator(
+                                progress = frac,
+                                modifier = GlanceModifier.fillMaxWidth().height(4.dp),
+                                color = ColorProvider(vaultBarColor(vault.vaultKey)),
+                                backgroundColor = ColorProvider(Color(0xFF242426))
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. WIDE COMPACT BAR (e.g. 3x1 or 4x1): Clean titles + primary metrics, zero truncation
+        !isNarrow && isShort -> {
+            Row(
+                modifier = GlanceModifier
+                    .fillMaxSize()
+                    .background(ColorProvider(Color(0xFF121214)))
+                    .cornerRadius(16.dp)
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                    .clickable(actionStartActivity<MainActivity>()),
+                verticalAlignment = Alignment.Vertical.CenterVertically
+            ) {
+                Column(modifier = GlanceModifier.defaultWeight()) {
+                    Text(
+                        text = "USABLE CASH",
+                        style = TextStyle(color = ColorProvider(Color.White), fontSize = 9.sp, fontWeight = FontWeight.Bold),
                         maxLines = 1
                     )
                     Text(
-                        text = "Safe Daily Pace",
-                        style = TextStyle(
-                            color = ColorProvider(Color(0xFF8E8E93)),
-                            fontSize = 10.sp
-                        ),
+                        text = "AED ${String.format("%,.0f", usableCash)}",
+                        style = TextStyle(color = ColorProvider(Color(0xFF00E676)), fontSize = 20.sp, fontWeight = FontWeight.Bold),
                         maxLines = 1
                     )
                 }
-            }
 
-            Spacer(modifier = GlanceModifier.defaultWeight())
-
-            // 3. Visual Progress Section (Fills the center with live vault & runway telemetry)
-            if (isExpanded) {
-                // Cash vs. Time Runway Gauge
-                val cashPct = if (cyclePool > 0.0) (usableCash / cyclePool).toFloat().coerceIn(0f, 1f) else 0.43f
-                val timePct = (daysLeft.toFloat() / totalCycleDays.toFloat()).coerceIn(0f, 1f)
-
-                Column(modifier = GlanceModifier.fillMaxWidth()) {
-                    Row(modifier = GlanceModifier.fillMaxWidth()) {
-                        Text(
-                            text = "Cash Runway ${(cashPct * 100).toInt()}% left",
-                            style = TextStyle(color = ColorProvider(Color(0xFFD1D1D6)), fontSize = 10.sp, fontWeight = FontWeight.Medium),
-                            maxLines = 1,
-                            modifier = GlanceModifier.defaultWeight()
-                        )
-                        Text(
-                            text = "Cycle Time ${(timePct * 100).toInt()}% left",
-                            style = TextStyle(color = ColorProvider(Color(0xFF8E8E93)), fontSize = 10.sp),
-                            maxLines = 1
-                        )
-                    }
-                    Spacer(modifier = GlanceModifier.height(3.dp))
-                    LinearProgressIndicator(
-                        progress = cashPct,
-                        modifier = GlanceModifier.fillMaxWidth().height(5.dp),
-                        color = ColorProvider(if (cashPct >= timePct) Color(0xFF00E676) else Color(0xFFFF9F0A)),
-                        backgroundColor = ColorProvider(Color(0xFF242426))
+                Column(
+                    horizontalAlignment = Alignment.Horizontal.End,
+                    modifier = GlanceModifier.padding(end = 12.dp)
+                ) {
+                    Text(
+                        text = "DAILY PACE (${daysLeft}D)",
+                        style = TextStyle(color = ColorProvider(Color.White), fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                        maxLines = 1
+                    )
+                    Text(
+                        text = "AED ${String.format("%.0f", dailySafe)}/day",
+                        style = TextStyle(color = ColorProvider(Color.White), fontSize = 15.sp, fontWeight = FontWeight.Bold),
+                        maxLines = 1
                     )
                 }
 
-                Spacer(modifier = GlanceModifier.height(8.dp))
+                SyncPill(compact = true)
+            }
+        }
 
-                // Up to 3 Active Vault Bars
-                activeVaults.take(3).forEach { vault ->
-                    val frac = if (vault.allocatedAmount > 0.0) (vault.currentRemaining / vault.allocatedAmount).toFloat().coerceIn(0f, 1f) else 0f
+        // 4. STANDARD (4x2 / 5x2) & EXPANDED (4x3 / 5x3) COCKPIT
+        else -> {
+            Column(
+                modifier = GlanceModifier
+                    .fillMaxSize()
+                    .background(ColorProvider(Color(0xFF121214)))
+                    .cornerRadius(18.dp)
+                    .padding(14.dp)
+                    .clickable(actionStartActivity<MainActivity>())
+            ) {
+                // Header: Mode + Sync
+                Row(
+                    modifier = GlanceModifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Vertical.CenterVertically
+                ) {
+                    Text(
+                        text = "● ${activeMode.first}",
+                        style = TextStyle(color = ColorProvider(modeColor), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                        maxLines = 1,
+                        modifier = GlanceModifier.defaultWeight()
+                    )
+                    SyncPill(compact = false)
+                }
+
+                Spacer(modifier = GlanceModifier.height(6.dp))
+
+                // Hero Row: Clean Titles + Primary Numbers only
+                Row(
+                    modifier = GlanceModifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Vertical.Bottom
+                ) {
+                    Column(modifier = GlanceModifier.defaultWeight()) {
+                        Text(
+                            text = "USABLE CASH",
+                            style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                            maxLines = 1
+                        )
+                        Text(
+                            text = "AED ${String.format("%,.0f", usableCash)}",
+                            style = TextStyle(color = ColorProvider(Color(0xFF00E676)), fontSize = 25.sp, fontWeight = FontWeight.Bold),
+                            maxLines = 1
+                        )
+                    }
+
+                    Column(horizontalAlignment = Alignment.Horizontal.End) {
+                        Text(
+                            text = "DAILY PACE (${daysLeft}D)",
+                            style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                            maxLines = 1
+                        )
+                        Text(
+                            text = "AED ${String.format("%.0f", dailySafe)}/day",
+                            style = TextStyle(color = ColorProvider(Color.White), fontSize = 16.sp, fontWeight = FontWeight.Bold),
+                            maxLines = 1
+                        )
+                    }
+                }
+
+                Spacer(modifier = GlanceModifier.defaultWeight())
+
+                // Progressive Middle Telemetry
+                if (isTall) {
+                    // Cash Runway Bar
+                    val cashPct = if (cyclePool > 0.0) (usableCash / cyclePool).toFloat().coerceIn(0f, 1f) else 0.43f
                     Column(modifier = GlanceModifier.fillMaxWidth().padding(bottom = 6.dp)) {
                         Row(modifier = GlanceModifier.fillMaxWidth()) {
                             Text(
-                                text = vaultDisplayName(vault.vaultKey),
-                                style = TextStyle(color = ColorProvider(Color(0xFFD1D1D6)), fontSize = 10.sp, fontWeight = FontWeight.Medium),
+                                text = "Cash Runway",
+                                style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Medium),
                                 maxLines = 1,
                                 modifier = GlanceModifier.defaultWeight()
                             )
                             Text(
-                                text = "AED ${String.format("%,.0f", vault.currentRemaining)} (${(frac * 100).toInt()}%)",
-                                style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                text = "${(cashPct * 100).toInt()}%",
+                                style = TextStyle(color = ColorProvider(Color(0xFF00E676)), fontSize = 10.sp, fontWeight = FontWeight.Bold),
                                 maxLines = 1
                             )
                         }
                         Spacer(modifier = GlanceModifier.height(3.dp))
                         LinearProgressIndicator(
-                            progress = frac,
+                            progress = cashPct,
                             modifier = GlanceModifier.fillMaxWidth().height(5.dp),
-                            color = ColorProvider(vaultBarColor(vault.vaultKey)),
+                            color = ColorProvider(Color(0xFF00E676)),
                             backgroundColor = ColorProvider(Color(0xFF242426))
                         )
                     }
-                }
 
-                // Credit Card Limit Utilization Bar
-                val ccUtil = (totalCcOwed / ccLimit).toFloat().coerceIn(0f, 1f)
-                Column(modifier = GlanceModifier.fillMaxWidth()) {
-                    Row(modifier = GlanceModifier.fillMaxWidth()) {
-                        Text(
-                            text = "Card 3445 Limit Used (${(ccUtil * 100).toInt()}%)",
-                            style = TextStyle(color = ColorProvider(Color(0xFF8E8E93)), fontSize = 10.sp),
-                            maxLines = 1,
-                            modifier = GlanceModifier.defaultWeight()
-                        )
-                        Text(
-                            text = "AED ${String.format("%,.0f", totalCcOwed)} / 42k",
-                            style = TextStyle(color = ColorProvider(Color(0xFFFF453A)), fontSize = 10.sp, fontWeight = FontWeight.Bold),
-                            maxLines = 1
+                    // Top 3 Vault Bars
+                    activeVaults.take(3).forEach { vault ->
+                        val frac = if (vault.allocatedAmount > 0.0) (vault.currentRemaining / vault.allocatedAmount).toFloat().coerceIn(0f, 1f) else 0f
+                        Column(modifier = GlanceModifier.fillMaxWidth().padding(bottom = 6.dp)) {
+                            Row(modifier = GlanceModifier.fillMaxWidth()) {
+                                Text(
+                                    text = vaultDisplayName(vault.vaultKey),
+                                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Medium),
+                                    maxLines = 1,
+                                    modifier = GlanceModifier.defaultWeight()
+                                )
+                                Text(
+                                    text = "AED ${String.format("%,.0f", vault.currentRemaining)}",
+                                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                    maxLines = 1
+                                )
+                            }
+                            Spacer(modifier = GlanceModifier.height(3.dp))
+                            LinearProgressIndicator(
+                                progress = frac,
+                                modifier = GlanceModifier.fillMaxWidth().height(5.dp),
+                                color = ColorProvider(vaultBarColor(vault.vaultKey)),
+                                backgroundColor = ColorProvider(Color(0xFF242426))
+                            )
+                        }
+                    }
+
+                    // Card 3445 Utilization Bar
+                    val ccUtil = (totalCcOwed / ccLimit).toFloat().coerceIn(0f, 1f)
+                    Column(modifier = GlanceModifier.fillMaxWidth()) {
+                        Row(modifier = GlanceModifier.fillMaxWidth()) {
+                            Text(
+                                text = "Card 3445 Limit",
+                                style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Medium),
+                                maxLines = 1,
+                                modifier = GlanceModifier.defaultWeight()
+                            )
+                            Text(
+                                text = "AED ${String.format("%,.0f", totalCcOwed)} / 42k",
+                                style = TextStyle(color = ColorProvider(Color(0xFFFF453A)), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                maxLines = 1
+                            )
+                        }
+                        Spacer(modifier = GlanceModifier.height(3.dp))
+                        LinearProgressIndicator(
+                            progress = ccUtil,
+                            modifier = GlanceModifier.fillMaxWidth().height(4.dp),
+                            color = ColorProvider(Color(0xFFFF453A)),
+                            backgroundColor = ColorProvider(Color(0xFF242426))
                         )
                     }
-                    Spacer(modifier = GlanceModifier.height(3.dp))
-                    LinearProgressIndicator(
-                        progress = ccUtil,
-                        modifier = GlanceModifier.fillMaxWidth().height(4.dp),
-                        color = ColorProvider(Color(0xFFFF453A)),
-                        backgroundColor = ColorProvider(Color(0xFF242426))
-                    )
-                }
-            } else {
-                // Standard 2-Row Height: Side-by-side or stacked top 2 Cash Vault Bars
-                val topTwo = activeVaults.take(2)
-                if (topTwo.isNotEmpty()) {
-                    Row(
-                        modifier = GlanceModifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.Vertical.CenterVertically
-                    ) {
-                        topTwo.forEachIndexed { idx, vault ->
-                            val frac = if (vault.allocatedAmount > 0.0) (vault.currentRemaining / vault.allocatedAmount).toFloat().coerceIn(0f, 1f) else 0f
-                            Column(
-                                modifier = GlanceModifier
-                                    .defaultWeight()
-                                    .padding(end = if (idx == 0 && topTwo.size > 1) 8.dp else 0.dp)
-                            ) {
-                                Row(modifier = GlanceModifier.fillMaxWidth()) {
-                                    Text(
-                                        text = vaultShortName(vault.vaultKey),
-                                        style = TextStyle(color = ColorProvider(Color(0xFF8E8E93)), fontSize = 9.sp, fontWeight = FontWeight.Medium),
-                                        maxLines = 1,
-                                        modifier = GlanceModifier.defaultWeight()
-                                    )
-                                    Text(
-                                        text = "AED ${String.format("%,.0f", vault.currentRemaining)}",
-                                        style = TextStyle(color = ColorProvider(Color.White), fontSize = 9.sp, fontWeight = FontWeight.Bold),
-                                        maxLines = 1
+                } else {
+                    // Standard 2-Row Height: Side-by-side Top 2 Vault Bars
+                    val topTwo = activeVaults.take(2)
+                    if (topTwo.isNotEmpty()) {
+                        Row(
+                            modifier = GlanceModifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.Vertical.CenterVertically
+                        ) {
+                            topTwo.forEachIndexed { idx, vault ->
+                                val frac = if (vault.allocatedAmount > 0.0) (vault.currentRemaining / vault.allocatedAmount).toFloat().coerceIn(0f, 1f) else 0f
+                                Column(
+                                    modifier = GlanceModifier
+                                        .defaultWeight()
+                                        .padding(end = if (idx == 0 && topTwo.size > 1) 10.dp else 0.dp)
+                                ) {
+                                    Row(modifier = GlanceModifier.fillMaxWidth()) {
+                                        Text(
+                                            text = vaultShortName(vault.vaultKey),
+                                            style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Medium),
+                                            maxLines = 1,
+                                            modifier = GlanceModifier.defaultWeight()
+                                        )
+                                        Text(
+                                            text = "AED ${String.format("%,.0f", vault.currentRemaining)}",
+                                            style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                            maxLines = 1
+                                        )
+                                    }
+                                    Spacer(modifier = GlanceModifier.height(3.dp))
+                                    LinearProgressIndicator(
+                                        progress = frac,
+                                        modifier = GlanceModifier.fillMaxWidth().height(5.dp),
+                                        color = ColorProvider(vaultBarColor(vault.vaultKey)),
+                                        backgroundColor = ColorProvider(Color(0xFF242426))
                                     )
                                 }
-                                Spacer(modifier = GlanceModifier.height(3.dp))
-                                LinearProgressIndicator(
-                                    progress = frac,
-                                    modifier = GlanceModifier.fillMaxWidth().height(5.dp),
-                                    color = ColorProvider(vaultBarColor(vault.vaultKey)),
-                                    backgroundColor = ColorProvider(Color(0xFF242426))
-                                )
                             }
                         }
                     }
                 }
-            }
 
-            Spacer(modifier = GlanceModifier.defaultWeight())
+                Spacer(modifier = GlanceModifier.defaultWeight())
 
-            // 4. Bottom Footer Row: CC Statement Status + Unbilled Balance
-            Row(
-                modifier = GlanceModifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Vertical.CenterVertically
-            ) {
-                val billText = if (billedDue <= 0.01) "CC Bill: PAID ✓" else "CC Due: AED ${String.format("%,.0f", billedDue)}"
-                val billColor = if (billedDue <= 0.01) Color(0xFF00E676) else Color(0xFFFF9F0A)
+                // Footer Row: CC Status + Unbilled (always visible)
+                Row(
+                    modifier = GlanceModifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Vertical.CenterVertically
+                ) {
+                    val billText = if (billedDue <= 0.01) "CC Bill: PAID ✓" else "CC Due: AED ${String.format("%,.0f", billedDue)}"
+                    val billColor = if (billedDue <= 0.01) Color(0xFF00E676) else Color(0xFFFF9F0A)
 
-                Text(
-                    text = billText,
-                    style = TextStyle(
-                        color = ColorProvider(billColor),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    ),
-                    maxLines = 1,
-                    modifier = GlanceModifier.defaultWeight()
-                )
-                Text(
-                    text = "Unbilled: AED ${String.format("%,.0f", unbilled)}",
-                    style = TextStyle(
-                        color = ColorProvider(Color(0xFFFF453A)),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    ),
-                    maxLines = 1
-                )
+                    Text(
+                        text = billText,
+                        style = TextStyle(color = ColorProvider(billColor), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                        maxLines = 1,
+                        modifier = GlanceModifier.defaultWeight()
+                    )
+                    Text(
+                        text = "Unbilled: AED ${String.format("%,.0f", unbilled)}",
+                        style = TextStyle(color = ColorProvider(Color(0xFFFF453A)), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                        maxLines = 1
+                    )
+                }
             }
         }
     }
