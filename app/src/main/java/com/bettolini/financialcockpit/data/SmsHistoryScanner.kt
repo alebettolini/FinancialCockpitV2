@@ -2,11 +2,11 @@ package com.bettolini.financialcockpit.data
 
 import android.content.Context
 import android.provider.Telephony
+import com.bettolini.financialcockpit.domain.ClassificationResult
 import com.bettolini.financialcockpit.domain.DynamicAllocationEngine
 import com.bettolini.financialcockpit.domain.MerchantClassifier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -83,7 +83,6 @@ object SmsHistoryScanner {
                 val date = c.getLong(dateIndex)
 
                 if (address.contains("ENBD", true) || address.contains("EmiratesNBD", true)) {
-                    // Explicit account discrimination so checking debits for CC payment don't get misread as CC alerts
                     val isDebitAccountMsg = body.contains("A/C", true) ||
                             body.contains("Account", true) ||
                             body.contains("8691", true) ||
@@ -96,7 +95,6 @@ object SmsHistoryScanner {
                             body.contains("Limit", true)
                     )
 
-                    // 1. Live Checking Account Balance
                     val debitBalMatch = debitBalanceRegex.find(body)
                     if (debitBalMatch != null && !isCredit) {
                         debitBalMatch.groupValues[1].replace(",", "").toDoubleOrNull()?.let {
@@ -104,7 +102,6 @@ object SmsHistoryScanner {
                         }
                     }
 
-                    // 2. Credit Card Available Limit
                     val creditLimMatch = creditLimitRegex.find(body)
                     val parsedLimitInMsg = creditLimMatch?.groupValues?.get(1)?.replace(",", "")?.toDoubleOrNull()
                     if (parsedLimitInMsg != null) {
@@ -112,7 +109,6 @@ object SmsHistoryScanner {
                         lastCreditLimitTimestamp = date
                     }
 
-                    // 3. Monthly Statement Generated
                     val statementMatch = statementRegex.find(body)
                     if (statementMatch != null && isCredit) {
                         statementMatch.groupValues[1].replace(",", "").toDoubleOrNull()?.let {
@@ -124,14 +120,12 @@ object SmsHistoryScanner {
                         }
                     }
 
-                    // 4. Credit Card Repayment Received
                     val paymentMatch = ccPaymentRegex.find(body)
                     if (paymentMatch != null && isCredit) {
                         val paid = paymentMatch.groupValues[1].replace(",", "").toDoubleOrNull() ?: 0.0
                         detectedStatementDue = (detectedStatementDue - paid).coerceAtLeast(0.0)
                     }
 
-                    // 5. Spend & Internal Transfer Tracking
                     val isPaymentReceipt = body.contains("received towards", true) || body.contains("credited", true)
                     val isCcBillTransfer = body.contains("Credit Card payment", true) || body.contains("Card Payment", true)
                     val purchaseMatch = purchaseRegex.find(body)
@@ -145,13 +139,13 @@ object SmsHistoryScanner {
                         }
 
                         val classification = if (isCcBillTransfer) {
-                            com.bettolini.financialcockpit.domain.ClassificationResult(
+                            ClassificationResult(
                                 vaultKey = "INTERNAL_TRANSFER",
                                 subTag = "#CC Bill Paid",
                                 cleanMerchant = "ENBD Card 3445 Repayment"
                             )
                         } else {
-                            MerchantClassifier.classify(rawMerchant, body)
+                            MerchantClassifier.classify(rawMerchant, body, isCredit)
                         }
 
                         parsedTransactions.add(
@@ -176,11 +170,10 @@ object SmsHistoryScanner {
         val unbilledSpend = (creditTotalOwed - detectedStatementDue).coerceAtLeast(0.0)
         val trueUsableCash = (detectedDebitBalance - detectedStatementDue).coerceAtLeast(0.0)
 
-        // Payday-Anchored Vault Ledger:
-        // Reconstruct cycle starting usable pool = True Usable Cash Today + Total Cycle Vault Spend
-        val cycleSpendTxns = parsedTransactions.filter { it.isCurrentCycle && !it.isInternalTransfer }
-        val totalCycleSpend = cycleSpendTxns.sumOf { it.amount }
-        val reconstructedCycleStartPool = trueUsableCash + totalCycleSpend
+        // Reconstruct cycle starting pool from CHECKING debits only (never inflate with unbilled CC debt)
+        val cycleAllSpendTxns = parsedTransactions.filter { it.isCurrentCycle && !it.isInternalTransfer }
+        val cycleCheckingSpendOnly = cycleAllSpendTxns.filter { !it.isCreditCard }.sumOf { it.amount }
+        val reconstructedCycleStartPool = trueUsableCash + cycleCheckingSpendOnly
 
         val baselineAlloc = DynamicAllocationEngine.calculateDynamicSplit(reconstructedCycleStartPool)
         val vaultTargets = mapOf(
@@ -193,11 +186,10 @@ object SmsHistoryScanner {
         )
 
         val updatedVaults = vaultTargets.map { (key, target) ->
-            val vaultTxns = cycleSpendTxns.filter { it.deducedVault == key }
+            val vaultTxns = cycleAllSpendTxns.filter { it.deducedVault == key }
             val spent = vaultTxns.sumOf { it.amount }
-            val remaining = target - spent // Can go negative if overspent in that specific vault
+            val remaining = target - spent
 
-            // Build top sub-tag summary string for this vault
             val tagSummary = vaultTxns
                 .groupBy { it.subTag }
                 .mapValues { entry -> entry.value.sumOf { it.amount } }

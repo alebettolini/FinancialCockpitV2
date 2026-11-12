@@ -14,6 +14,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -87,7 +88,6 @@ class MainActivity : ComponentActivity() {
                     val payday = if (today.dayOfMonth < 22) today.withDayOfMonth(22) else today.plusMonths(1).withDayOfMonth(22)
                     val daysUntilPayday = ChronoUnit.DAYS.between(today, payday).coerceAtLeast(1)
 
-                    // Core Accounting Math
                     val checkingCash = snapshot?.liveDebitBalance ?: 6296.29
                     val currentStatementDue = snapshot?.statementDue ?: 3620.45
                     val dueDateLabel = snapshot?.statementDueDate ?: "19 Nov"
@@ -100,13 +100,11 @@ class MainActivity : ComponentActivity() {
                     val usableCashToday = (checkingCash - currentStatementDue).coerceAtLeast(0.0)
                     val safeDaily = (usableCashToday / daysUntilPayday.toDouble()).coerceAtLeast(0.0)
 
-                    // Forward Projection (Next Payday on 22nd)
                     val expectedSalary = 9750.00
                     val autoLoanEmi = 1594.00
                     val nextMonthCcCommitment = if (unbilledVal > 1000.0) 147.00 else unbilledVal
                     val projectedNextMonthBudget = (usableCashToday + expectedSalary - autoLoanEmi - nextMonthCcCommitment).coerceAtLeast(0.0)
 
-                    // Cross-vault overage calculation
                     val totalVaultOverage = vaults.filter { it.currentRemaining < 0.0 }.sumOf { -it.currentRemaining }
 
                     LazyColumn(
@@ -116,7 +114,6 @@ class MainActivity : ComponentActivity() {
                         contentPadding = PaddingValues(vertical = 20.dp)
                     ) {
                         item {
-                            // Header
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -162,7 +159,6 @@ class MainActivity : ComponentActivity() {
 
                             Spacer(modifier = Modifier.height(18.dp))
 
-                            // 1. True Usable Liquid Runway Card
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(20.dp),
@@ -209,7 +205,6 @@ class MainActivity : ComponentActivity() {
 
                             Spacer(modifier = Modifier.height(14.dp))
 
-                            // 2. Credit Card Liability & Forward Projection Card
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(20.dp),
@@ -279,7 +274,6 @@ class MainActivity : ComponentActivity() {
 
                             Spacer(modifier = Modifier.height(16.dp))
 
-                            // 3. Payday-Anchored Donut Chart Card
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(20.dp),
@@ -299,7 +293,7 @@ class MainActivity : ComponentActivity() {
                                     )
                                     if (cyclePool > 0.0) {
                                         Text(
-                                            text = "Cycle Starting Pool: AED ${String.format("%,.0f", cyclePool)}",
+                                            text = "Cycle Cash Pool: AED ${String.format("%,.0f", cyclePool)}",
                                             fontSize = 11.sp,
                                             color = Color(0xFF636366)
                                         )
@@ -317,7 +311,7 @@ class MainActivity : ComponentActivity() {
                                             border = BorderStroke(1.dp, Color(0xFF5C2326))
                                         ) {
                                             Text(
-                                                text = "⚠ Vault Overage: AED ${String.format("%,.2f", totalVaultOverage)} cannibalized from other vaults",
+                                                text = "⚠ Total Lifestyle Spend Overage: AED ${String.format("%,.2f", totalVaultOverage)} above cycle cash targets",
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = Color(0xFFFF6961),
@@ -330,7 +324,6 @@ class MainActivity : ComponentActivity() {
 
                             Spacer(modifier = Modifier.height(16.dp))
 
-                            // Quick Salary Simulator Buttons
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -405,7 +398,7 @@ class MainActivity : ComponentActivity() {
                             item {
                                 Spacer(modifier = Modifier.height(14.dp))
                                 Text(
-                                    text = "RECENT PARSED ENBD ALERTS",
+                                    text = "RECENT PARSED ENBD ALERTS (TAP TO INSPECT)",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     letterSpacing = 1.sp,
@@ -614,56 +607,73 @@ fun VaultItemCard(vault: VaultBalanceEntity) {
 
 @Composable
 fun TransactionRowCard(txn: TransactionEntity) {
+    var expanded by remember { mutableStateOf(false) }
     val formatter = remember { DateTimeFormatter.ofPattern("dd MMM, HH:mm").withZone(ZoneId.systemDefault()) }
     val formattedDate = formatter.format(Instant.ofEpochMilli(txn.timestamp))
     val tagColor = if (txn.isInternalTransfer) Color(0xFF00E676) else getVaultColor(txn.deducedVault)
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { expanded = !expanded },
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF161618)),
         border = BorderStroke(1.dp, Color(0xFF242426))
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = txn.merchant,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "${if (txn.isCreditCard) "CC 3445" else "DEBIT 8691"} • $formattedDate",
-                        fontSize = 11.sp,
-                        color = if (txn.isCreditCard) Color(0xFFFF9F0A) else Color(0xFF388AF6)
+                        text = txn.merchant,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = tagColor.copy(alpha = 0.16f)
-                    ) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = txn.subTag,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = tagColor,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            text = "${if (txn.isCreditCard) "CC 3445" else "DEBIT 8691"} • $formattedDate",
+                            fontSize = 11.sp,
+                            color = if (txn.isCreditCard) Color(0xFFFF9F0A) else Color(0xFF388AF6)
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = tagColor.copy(alpha = 0.16f)
+                        ) {
+                            Text(
+                                text = txn.subTag,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = tagColor,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
                     }
                 }
+                Text(
+                    text = "AED ${String.format("%,.2f", txn.amount)}",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (txn.isInternalTransfer) Color(0xFF00E676) else Color.White
+                )
             }
-            Text(
-                text = "AED ${String.format("%,.2f", txn.amount)}",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (txn.isInternalTransfer) Color(0xFF00E676) else Color.White
-            )
+
+            if (expanded) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF242426)))
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = txn.rawSms,
+                    fontSize = 11.sp,
+                    color = Color(0xFF8E8E93),
+                    lineHeight = 15.sp
+                )
+            }
         }
     }
 }

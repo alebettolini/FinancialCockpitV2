@@ -14,13 +14,8 @@ object MerchantClassifier {
         val subTag: String
     )
 
-    private val rules = listOf(
-        // 1. Fixed Overhead & Mandatory Debits
-        Rule(
-            keywords = listOf("PL-AC", "LOAN", "FINANCE", "EMI"),
-            vaultKey = "FIXED_OVERHEAD",
-            subTag = "#Auto Loan"
-        ),
+    private val merchantRules = listOf(
+        // 1. Fixed Overhead & Bills
         Rule(
             keywords = listOf("DEWA", "EMPOWER", "LOOTAH", "ETISALAT", "E&", "DU ", "DU-", "VIRGIN MOBILE", "TAQA"),
             vaultKey = "FIXED_OVERHEAD",
@@ -43,7 +38,7 @@ object MerchantClassifier {
             subTag = "#Rent"
         ),
 
-        // 3. Sustenance & Fleet (Fuel, Maintenance, Groceries, Clean Nutrition)
+        // 3. Sustenance & Fleet (Fuel, Maintenance, Parts, Groceries)
         Rule(
             keywords = listOf("ENOC", "EPPCO", "ADNOC", "EMARAT", "CAFU", "PETROL", "FUEL"),
             vaultKey = "SUSTENANCE_FLEET",
@@ -53,10 +48,11 @@ object MerchantClassifier {
             keywords = listOf(
                 "AUTOPRO", "TASJEEL", "SHAMIL", "TYRE", "TIRE", "MICHELIN", "BRIDGESTONE",
                 "BOSCH", "CORSA", "GARAGE", "MOTOR", "AUTO", "CAR WASH", "DETAILING",
-                "KTM", "CORVETTE", "JEEP", "RTA", "NOL", "PARKING", "MPARKING", "CAREEM", "UBER", "HALA"
+                "KTM", "CORVETTE", "JEEP", "RTA", "NOL", "PARKING", "MPARKING", "CAREEM", "UBER", "HALA",
+                "PARTSOUQ", "ROCKAUTO", "SUMMIT", "JEGS", "ZDEGREE", "TYREPLUS", "PITSTOP", "AL FUTTAIM", "AL NABOODAH"
             ),
             vaultKey = "SUSTENANCE_FLEET",
-            subTag = "#Fleet & Transit"
+            subTag = "#Fleet & Parts"
         ),
         Rule(
             keywords = listOf(
@@ -80,7 +76,7 @@ object MerchantClassifier {
             subTag = "#Travel"
         ),
 
-        // 5. Discretionary: Nightlife, Bars, Beach Clubs & Lounges
+        // 5. Discretionary: Nightlife, Bars & Beach Clubs
         Rule(
             keywords = listOf(
                 "PACHA", "ICON", "GIANPULA", "SOHO GARDEN", "WHITE DUBAI", "BLU DUBAI",
@@ -98,14 +94,14 @@ object MerchantClassifier {
             subTag = "#Nightlife"
         ),
 
-        // 6. Discretionary: Grooming & Wellness
+        // 6. Discretionary: Grooming
         Rule(
             keywords = listOf("GENTS SALON", "1987", "BARBER", "CHAPS", "AKIN", "TONI&GUY", "GROOMING", "SPA"),
             vaultKey = "DISCRETIONARY",
             subTag = "#Grooming"
         ),
 
-        // 7. Discretionary: Dubai Restaurants, Specialty Coffee & Delivery
+        // 7. Discretionary: Dubai Restaurants & Specialty Coffee
         Rule(
             keywords = listOf(
                 "ZYARA", "ORTO", "FLAT12", "FLAT 12", "GLORIA OSTERIA", "AL GARGHET",
@@ -125,20 +121,47 @@ object MerchantClassifier {
             ),
             vaultKey = "DISCRETIONARY",
             subTag = "#Dining"
+        ),
+
+        // 8. Discretionary: Online Retail & Home
+        Rule(
+            keywords = listOf(
+                "AMAZON", "NOON", "TABBY", "TAMARA", "ALIEXPRESS", "TEMU", "SHEIN",
+                "NAMSHI", "OUNASS", "IKEA", "PAN HOME", "HOME CENTRE", "ACE", "DANUBE",
+                "VIRGIN MEGASTORE", "SHARAF DG", "JUMBO", "EMAX", "ZARA", "H&M", "UNIQLO"
+            ),
+            vaultKey = "DISCRETIONARY",
+            subTag = "#Online & Retail"
         )
     )
 
-    fun classify(rawMerchant: String, rawSms: String): ClassificationResult {
-        val searchSpace = "${rawMerchant.uppercase()} ${rawSms.uppercase()}"
+    fun classify(rawMerchant: String, rawSms: String, isCreditCard: Boolean): ClassificationResult {
+        val upperSms = rawSms.uppercase()
         val cleanedName = rawMerchant
             .replace(Regex("""\s+ARE$""", RegexOption.IGNORE_CASE), "")
             .replace(Regex("""\s+AE$""", RegexOption.IGNORE_CASE), "")
             .replace(Regex("""\s+DUBAI$""", RegexOption.IGNORE_CASE), "")
             .trim()
-            .ifBlank { "Purchase" }
+            .ifBlank { if (isCreditCard) "Card Purchase" else "Account Debit" }
 
-        for (rule in rules) {
-            if (rule.keywords.any { keyword -> searchSpace.contains(keyword) }) {
+        val upperMerchant = cleanedName.uppercase()
+
+        // 1. Strict Checking-Only Institutional Debits (prevents CC "EMI" footers from matching #Auto Loan)
+        if (!isCreditCard) {
+            if (upperSms.contains("PL-AC") || upperSms.contains("AUTO LOAN") || upperSms.contains("CAR LOAN")) {
+                return ClassificationResult("FIXED_OVERHEAD", "#Auto Loan", "ENBD Auto Loan (Corvette)")
+            }
+            if (upperSms.contains("ATM") || upperSms.contains("CASH WITHDRAWAL")) {
+                return ClassificationResult("DISCRETIONARY", "#ATM Cash", "ATM Cash Withdrawal")
+            }
+            if (upperSms.contains("OUTWARD") || upperSms.contains("REMITTANCE") || upperSms.contains("AANI") || upperSms.contains("TRANSFER")) {
+                return ClassificationResult("DISCRETIONARY", "#Transfers", cleanedName)
+            }
+        }
+
+        // 2. Match primarily against the Merchant Name (ignoring SMS promotional footers)
+        for (rule in merchantRules) {
+            if (rule.keywords.any { keyword -> upperMerchant.contains(keyword) }) {
                 return ClassificationResult(
                     vaultKey = rule.vaultKey,
                     subTag = rule.subTag,
