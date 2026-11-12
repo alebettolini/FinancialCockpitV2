@@ -59,6 +59,10 @@ data class CockpitColors(
     val amberAccent: Color,
     val plumAccent: Color,
     val positiveGreen: Color,
+    val shadowColor: Color,
+    val heroShadowColor: Color,
+    val cardBorderBrush: Brush,
+    val heroBorderBrush: Brush,
     val heroGradient: Brush,
     val amberGradient: Brush
 )
@@ -75,6 +79,14 @@ val LightCockpitColors = CockpitColors(
     amberAccent = Color(0xFFE58200),
     plumAccent = Color(0xFF8F3F78),
     positiveGreen = Color(0xFF12945A),
+    shadowColor = Color(0x182E1D59),
+    heroShadowColor = Color(0x38582B8C),
+    cardBorderBrush = Brush.verticalGradient(
+        listOf(Color(0xFFFFFFFF), Color(0xFFD0E1F3))
+    ),
+    heroBorderBrush = Brush.verticalGradient(
+        listOf(Color.White.copy(alpha = 0.32f), Color.White.copy(alpha = 0.06f))
+    ),
     heroGradient = Brush.linearGradient(listOf(VioletTop, VioletBot)),
     amberGradient = Brush.horizontalGradient(listOf(AmberTop, AmberBot))
 )
@@ -91,6 +103,14 @@ val DarkCockpitColors = CockpitColors(
     amberAccent = Color(0xFFFFB429),
     plumAccent = Color(0xFFD47BB8),
     positiveGreen = Color(0xFF2EE58F),
+    shadowColor = Color(0x4505030C),
+    heroShadowColor = Color(0x55220F45),
+    cardBorderBrush = Brush.verticalGradient(
+        listOf(Color(0xFF3B2F63), Color(0xFF21193B))
+    ),
+    heroBorderBrush = Brush.verticalGradient(
+        listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.04f))
+    ),
     heroGradient = Brush.linearGradient(listOf(VioletTop, IndigoBot)),
     amberGradient = Brush.horizontalGradient(listOf(AmberTop, AmberBot))
 )

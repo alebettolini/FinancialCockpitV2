@@ -12,22 +12,31 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -41,13 +50,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -71,6 +84,32 @@ private enum class ActiveScreen {
     CREDIT_ANALYTICS,
     VAULT_LEDGER,
     VAULT_DETAIL
+}
+
+/**
+ * Tactile spring press scale modifier for interactive cards.
+ */
+private fun Modifier.tactileCardPress(onClick: () -> Unit): Modifier = composed {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.982f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "tactile_press_scale"
+    )
+    this
+        .graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+        }
+        .clickable(
+            interactionSource = interactionSource,
+            indication = null,
+            onClick = onClick
+        )
 }
 
 class MainActivity : ComponentActivity() {
@@ -131,14 +170,26 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Navigation & Modal State
+            // Hoisted UI States: Preserves scroll offsets and active Debit/Credit pager page across navigation!
+            val dashboardListState = rememberLazyListState()
+            val vaultLedgerListState = rememberLazyListState()
+            val accountPagerState = rememberPagerState(initialPage = 0, pageCount = { 2 })
+
+            // Navigation & Direction State
             var currentScreen by remember { mutableStateOf(ActiveScreen.DASHBOARD) }
+            var isNavigatingBack by remember { mutableStateOf(false) }
             var selectedVaultKey by remember { mutableStateOf<String?>(null) }
             var showSettingsSheet by remember { mutableStateOf(false) }
             var showCycleHistorySheet by remember { mutableStateOf(false) }
             var selectedTxnForEdit by remember { mutableStateOf<TransactionEntity?>(null) }
 
-            BackHandler(enabled = currentScreen != ActiveScreen.DASHBOARD) {
+            fun navigateForward(target: ActiveScreen) {
+                isNavigatingBack = false
+                currentScreen = target
+            }
+
+            fun navigateBack() {
+                isNavigatingBack = true
                 if (currentScreen == ActiveScreen.VAULT_DETAIL) {
                     currentScreen = ActiveScreen.VAULT_LEDGER
                     selectedVaultKey = null
@@ -146,6 +197,10 @@ class MainActivity : ComponentActivity() {
                     currentScreen = ActiveScreen.DASHBOARD
                     selectedVaultKey = null
                 }
+            }
+
+            BackHandler(enabled = currentScreen != ActiveScreen.DASHBOARD) {
+                navigateBack()
             }
 
             ProvideCockpitColors(palette) {
@@ -181,13 +236,60 @@ class MainActivity : ComponentActivity() {
                         val nextMonthCcCommitment = if (unbilledVal > 1000.0) 147.00 else unbilledVal
                         val projectedNextMonthBudget = (usableCashToday + expectedSalary - autoLoanEmi - nextMonthCcCommitment).coerceAtLeast(0.0)
 
+                        // Spatial Container-Style Open/Close Transition
                         AnimatedContent(
                             targetState = currentScreen,
                             transitionSpec = {
-                                (fadeIn(tween(240)) + slideInVertically(tween(260)) { it / 18 })
-                                    .togetherWith(fadeOut(tween(180)) + slideOutVertically(tween(180)) { -it / 24 })
+                                if (!isNavigatingBack) {
+                                    // Forward: New view expands smoothly upward from card origin while parent recesses
+                                    (fadeIn(tween(260)) +
+                                            scaleIn(
+                                                initialScale = 0.92f,
+                                                transformOrigin = TransformOrigin(0.5f, 0.35f),
+                                                animationSpec = spring(
+                                                    dampingRatio = 0.88f,
+                                                    stiffness = Spring.StiffnessMediumLow
+                                                )
+                                            ) +
+                                            slideInVertically(
+                                                animationSpec = spring(
+                                                    dampingRatio = 0.88f,
+                                                    stiffness = Spring.StiffnessMediumLow
+                                                )
+                                            ) { it / 10 })
+                                        .togetherWith(
+                                            fadeOut(tween(180)) +
+                                                    scaleOut(
+                                                        targetScale = 0.96f,
+                                                        transformOrigin = TransformOrigin(0.5f, 0.35f),
+                                                        animationSpec = tween(220)
+                                                    )
+                                        )
+                                } else {
+                                    // Backward: Current view collapses smoothly back into card origin while parent restores at exact scroll offset
+                                    (fadeIn(tween(240)) +
+                                            scaleIn(
+                                                initialScale = 0.96f,
+                                                transformOrigin = TransformOrigin(0.5f, 0.35f),
+                                                animationSpec = spring(
+                                                    dampingRatio = 0.9f,
+                                                    stiffness = Spring.StiffnessMediumLow
+                                                )
+                                            ))
+                                        .togetherWith(
+                                            fadeOut(tween(190)) +
+                                                    scaleOut(
+                                                        targetScale = 0.92f,
+                                                        transformOrigin = TransformOrigin(0.5f, 0.35f),
+                                                        animationSpec = tween(220)
+                                                    ) +
+                                                    slideOutVertically(
+                                                        animationSpec = tween(220)
+                                                    ) { it / 10 }
+                                        )
+                                }
                             },
-                            label = "screen_transition"
+                            label = "spatial_screen_transition"
                         ) { screen ->
                             when (screen) {
                                 ActiveScreen.DEBIT_ANALYTICS -> {
@@ -206,7 +308,7 @@ class MainActivity : ComponentActivity() {
                                         midStatValue = "AED ${String.format("%.0f", safeDaily)}/d",
                                         rightStatLabel = "Runway",
                                         rightStatValue = "${daysUntilPayday}d left",
-                                        onBack = { currentScreen = ActiveScreen.DASHBOARD },
+                                        onBack = { navigateBack() },
                                         onSelectTransaction = { selectedTxnForEdit = it }
                                     )
                                 }
@@ -227,21 +329,22 @@ class MainActivity : ComponentActivity() {
                                         midStatValue = "AED ${String.format("%,.2f", unbilledVal)}",
                                         rightStatLabel = "Utilization",
                                         rightStatValue = "$utilizationPct%",
-                                        onBack = { currentScreen = ActiveScreen.DASHBOARD },
+                                        onBack = { navigateBack() },
                                         onSelectTransaction = { selectedTxnForEdit = it }
                                     )
                                 }
 
                                 ActiveScreen.VAULT_LEDGER -> {
                                     VaultLedgerScreen(
+                                        listState = vaultLedgerListState,
                                         vaults = vaults,
                                         cyclePool = cyclePool,
                                         cycleLabel = cycleLabel,
                                         activeMode = activeMode.first,
-                                        onBack = { currentScreen = ActiveScreen.DASHBOARD },
+                                        onBack = { navigateBack() },
                                         onSelectVault = { vaultKey ->
                                             selectedVaultKey = vaultKey
-                                            currentScreen = ActiveScreen.VAULT_DETAIL
+                                            navigateForward(ActiveScreen.VAULT_DETAIL)
                                         }
                                     )
                                 }
@@ -252,29 +355,25 @@ class MainActivity : ComponentActivity() {
                                         VaultDetailScreen(
                                             vault = activeVault,
                                             allTransactions = recentTxns,
-                                            onBack = {
-                                                currentScreen = ActiveScreen.VAULT_LEDGER
-                                                selectedVaultKey = null
-                                            },
+                                            onBack = { navigateBack() },
                                             onSelectTransaction = { selectedTxnForEdit = it }
                                         )
                                     } else {
-                                        currentScreen = ActiveScreen.VAULT_LEDGER
+                                        navigateBack()
                                     }
                                 }
 
                                 ActiveScreen.DASHBOARD -> {
-                                    val accountPagerState = rememberPagerState(initialPage = 0, pageCount = { 2 })
-
                                     LazyColumn(
+                                        state = dashboardListState,
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .padding(horizontal = 18.dp),
-                                        contentPadding = PaddingValues(top = 20.dp, bottom = 32.dp),
+                                        contentPadding = PaddingValues(top = 20.dp, bottom = 36.dp),
                                         verticalArrangement = Arrangement.spacedBy(16.dp)
                                     ) {
                                         // 1. Minimalist Top Bar (Title + Cycles + Settings Gear + Sync)
-                                        item {
+                                        item(key = "top_bar") {
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),
                                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -302,11 +401,12 @@ class MainActivity : ComponentActivity() {
                                                     Surface(
                                                         modifier = Modifier
                                                             .height(36.dp)
+                                                            .shadow(2.dp, RoundedCornerShape(12.dp), ambientColor = palette.shadowColor, spotColor = palette.shadowColor)
                                                             .clip(RoundedCornerShape(12.dp))
                                                             .clickable { showCycleHistorySheet = true },
                                                         shape = RoundedCornerShape(12.dp),
                                                         color = palette.surface,
-                                                        border = BorderStroke(1.dp, palette.border)
+                                                        border = BorderStroke(1.dp, palette.cardBorderBrush)
                                                     ) {
                                                         Box(
                                                             modifier = Modifier.padding(horizontal = 12.dp),
@@ -324,11 +424,12 @@ class MainActivity : ComponentActivity() {
                                                     Surface(
                                                         modifier = Modifier
                                                             .size(36.dp)
+                                                            .shadow(2.dp, RoundedCornerShape(12.dp), ambientColor = palette.shadowColor, spotColor = palette.shadowColor)
                                                             .clip(RoundedCornerShape(12.dp))
                                                             .clickable { showSettingsSheet = true },
                                                         shape = RoundedCornerShape(12.dp),
                                                         color = palette.surface,
-                                                        border = BorderStroke(1.dp, palette.border)
+                                                        border = BorderStroke(1.dp, palette.cardBorderBrush)
                                                     ) {
                                                         Box(contentAlignment = Alignment.Center) {
                                                             Icon(
@@ -343,6 +444,7 @@ class MainActivity : ComponentActivity() {
                                                     Surface(
                                                         modifier = Modifier
                                                             .height(36.dp)
+                                                            .shadow(4.dp, RoundedCornerShape(12.dp), ambientColor = palette.heroShadowColor, spotColor = palette.heroShadowColor)
                                                             .clip(RoundedCornerShape(12.dp))
                                                             .clickable {
                                                                 simulatedModeOverride = null
@@ -380,9 +482,8 @@ class MainActivity : ComponentActivity() {
                                         }
 
                                         // 2. Unified Swipeable Debit / Credit Hero Carousel
-                                        item {
+                                        item(key = "hero_carousel") {
                                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                                // Active Account Header + Interactive Page Dots
                                                 Row(
                                                     modifier = Modifier
                                                         .fillMaxWidth()
@@ -414,7 +515,6 @@ class MainActivity : ComponentActivity() {
                                                         )
                                                     }
 
-                                                    // Smooth Animated Indicator Dots
                                                     Row(
                                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                                         verticalAlignment = Alignment.CenterVertically
@@ -423,7 +523,10 @@ class MainActivity : ComponentActivity() {
                                                             val isSelected = accountPagerState.currentPage == idx
                                                             val dotWidth by animateDpAsState(
                                                                 targetValue = if (isSelected) 18.dp else 7.dp,
-                                                                animationSpec = tween(250),
+                                                                animationSpec = spring(
+                                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                                    stiffness = Spring.StiffnessMedium
+                                                                ),
                                                                 label = "pager_dot"
                                                             )
                                                             Box(
@@ -445,7 +548,6 @@ class MainActivity : ComponentActivity() {
                                                     }
                                                 }
 
-                                                // Horizontal Swipe Carousel (Same exact dimensions for both cards)
                                                 HorizontalPager(
                                                     state = accountPagerState,
                                                     modifier = Modifier.fillMaxWidth(),
@@ -457,9 +559,23 @@ class MainActivity : ComponentActivity() {
                                                             modifier = Modifier
                                                                 .fillMaxWidth()
                                                                 .height(216.dp)
+                                                                .shadow(
+                                                                    elevation = 14.dp,
+                                                                    shape = RoundedCornerShape(24.dp),
+                                                                    ambientColor = palette.heroShadowColor,
+                                                                    spotColor = palette.heroShadowColor
+                                                                )
                                                                 .clip(RoundedCornerShape(24.dp))
                                                                 .background(palette.heroGradient)
-                                                                .clickable { currentScreen = ActiveScreen.DEBIT_ANALYTICS }
+                                                                .background(
+                                                                    Brush.radialGradient(
+                                                                        colors = listOf(Color.White.copy(alpha = 0.14f), Color.Transparent),
+                                                                        center = Offset(120f, 60f),
+                                                                        radius = 650f
+                                                                    )
+                                                                )
+                                                                .border(1.dp, palette.heroBorderBrush, RoundedCornerShape(24.dp))
+                                                                .tactileCardPress { navigateForward(ActiveScreen.DEBIT_ANALYTICS) }
                                                                 .padding(22.dp)
                                                         ) {
                                                             Column(
@@ -570,9 +686,23 @@ class MainActivity : ComponentActivity() {
                                                             modifier = Modifier
                                                                 .fillMaxWidth()
                                                                 .height(216.dp)
+                                                                .shadow(
+                                                                    elevation = 14.dp,
+                                                                    shape = RoundedCornerShape(24.dp),
+                                                                    ambientColor = palette.heroShadowColor,
+                                                                    spotColor = palette.heroShadowColor
+                                                                )
                                                                 .clip(RoundedCornerShape(24.dp))
                                                                 .background(Brush.linearGradient(listOf(PlumTop, VioletBot)))
-                                                                .clickable { currentScreen = ActiveScreen.CREDIT_ANALYTICS }
+                                                                .background(
+                                                                    Brush.radialGradient(
+                                                                        colors = listOf(Color.White.copy(alpha = 0.14f), Color.Transparent),
+                                                                        center = Offset(120f, 60f),
+                                                                        radius = 650f
+                                                                    )
+                                                                )
+                                                                .border(1.dp, palette.heroBorderBrush, RoundedCornerShape(24.dp))
+                                                                .tactileCardPress { navigateForward(ActiveScreen.CREDIT_ANALYTICS) }
                                                                 .padding(22.dp)
                                                         ) {
                                                             Column(
@@ -682,16 +812,22 @@ class MainActivity : ComponentActivity() {
                                             }
                                         }
 
-                                        // 3. Vault Ledger Pie Chart Card (Clickable -> Vault Ledger Bar Chart Breakdown)
-                                        item {
+                                        // 3. Vault Ledger Pie Chart Card
+                                        item(key = "vault_ledger_card") {
                                             Surface(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
+                                                    .shadow(
+                                                        elevation = 6.dp,
+                                                        shape = RoundedCornerShape(22.dp),
+                                                        ambientColor = palette.shadowColor,
+                                                        spotColor = palette.shadowColor
+                                                    )
                                                     .clip(RoundedCornerShape(22.dp))
-                                                    .clickable { currentScreen = ActiveScreen.VAULT_LEDGER },
+                                                    .tactileCardPress { navigateForward(ActiveScreen.VAULT_LEDGER) },
                                                 shape = RoundedCornerShape(22.dp),
                                                 color = palette.surface,
-                                                border = BorderStroke(1.dp, palette.border)
+                                                border = BorderStroke(1.dp, palette.cardBorderBrush)
                                             ) {
                                                 Column(
                                                     modifier = Modifier.fillMaxWidth().padding(20.dp),
@@ -736,7 +872,7 @@ class MainActivity : ComponentActivity() {
 
                                         // 4. Recent Alerts directly below Vault Ledger
                                         if (recentTxns.isNotEmpty()) {
-                                            item {
+                                            item(key = "recent_alerts_header") {
                                                 Text(
                                                     text = "Recent Alerts",
                                                     fontSize = 15.sp,
@@ -866,11 +1002,11 @@ class MainActivity : ComponentActivity() {
 
 /**
  * Vault Ledger Breakdown Environment:
- * Opens when tapping the Vault Ledger pie chart card on the Home page.
- * Breaks down Rent, Fixed Overhead, Sustenance & Fleet, Discretionary, Travel & Wealth Surplus with bar charts.
+ * Preserves scroll state across drill-down into individual vaults.
  */
 @Composable
 fun VaultLedgerScreen(
+    listState: LazyListState,
     vaults: List<VaultBalanceEntity>,
     cyclePool: Double,
     cycleLabel: String,
@@ -883,13 +1019,14 @@ fun VaultLedgerScreen(
     val totalSpent = vaults.sumOf { it.spentAmount }
 
     LazyColumn(
+        state = listState,
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 18.dp),
-        contentPadding = PaddingValues(top = 20.dp, bottom = 32.dp),
+        contentPadding = PaddingValues(top = 20.dp, bottom = 36.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item {
+        item(key = "vault_ledger_header") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -899,11 +1036,12 @@ fun VaultLedgerScreen(
                     Surface(
                         modifier = Modifier
                             .height(36.dp)
+                            .shadow(2.dp, RoundedCornerShape(12.dp), ambientColor = palette.shadowColor, spotColor = palette.shadowColor)
                             .clip(RoundedCornerShape(12.dp))
                             .clickable { onBack() },
                         shape = RoundedCornerShape(12.dp),
                         color = palette.surface,
-                        border = BorderStroke(1.dp, palette.border)
+                        border = BorderStroke(1.dp, palette.cardBorderBrush)
                     ) {
                         Box(
                             modifier = Modifier.padding(horizontal = 11.dp),
@@ -938,7 +1076,7 @@ fun VaultLedgerScreen(
                     modifier = Modifier.height(36.dp),
                     shape = RoundedCornerShape(12.dp),
                     color = palette.surface,
-                    border = BorderStroke(1.dp, palette.border)
+                    border = BorderStroke(1.dp, palette.cardBorderBrush)
                 ) {
                     Box(
                         modifier = Modifier.padding(horizontal = 11.dp),
@@ -955,12 +1093,26 @@ fun VaultLedgerScreen(
             }
         }
 
-        item {
+        item(key = "vault_ledger_hero") {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .shadow(
+                        elevation = 14.dp,
+                        shape = RoundedCornerShape(24.dp),
+                        ambientColor = palette.heroShadowColor,
+                        spotColor = palette.heroShadowColor
+                    )
                     .clip(RoundedCornerShape(24.dp))
                     .background(Brush.linearGradient(listOf(AmethystTop, VioletBot)))
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(Color.White.copy(alpha = 0.14f), Color.Transparent),
+                            center = Offset(120f, 60f),
+                            radius = 650f
+                        )
+                    )
+                    .border(1.dp, palette.heroBorderBrush, RoundedCornerShape(24.dp))
                     .padding(22.dp)
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -995,7 +1147,7 @@ fun VaultLedgerScreen(
 
                     Text(
                         text = "AED ${String.format("%,.2f", totalRemaining)}",
-                        fontSize = 36.sp,
+                        fontSize = 35.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = (-1).sp,
                         color = Color.White
@@ -1012,7 +1164,7 @@ fun VaultLedgerScreen(
             }
         }
 
-        item {
+        item(key = "vault_breakdown_title") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1092,10 +1244,10 @@ fun AccountAnalyticsScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 18.dp),
-        contentPadding = PaddingValues(top = 20.dp, bottom = 32.dp),
+        contentPadding = PaddingValues(top = 20.dp, bottom = 36.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item {
+        item(key = "analytics_top_bar") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1105,11 +1257,12 @@ fun AccountAnalyticsScreen(
                     Surface(
                         modifier = Modifier
                             .height(36.dp)
+                            .shadow(2.dp, RoundedCornerShape(12.dp), ambientColor = palette.shadowColor, spotColor = palette.shadowColor)
                             .clip(RoundedCornerShape(12.dp))
                             .clickable { onBack() },
                         shape = RoundedCornerShape(12.dp),
                         color = palette.surface,
-                        border = BorderStroke(1.dp, palette.border)
+                        border = BorderStroke(1.dp, palette.cardBorderBrush)
                     ) {
                         Box(
                             modifier = Modifier.padding(horizontal = 11.dp),
@@ -1153,7 +1306,7 @@ fun AccountAnalyticsScreen(
                                 },
                             shape = RoundedCornerShape(12.dp),
                             color = if (active) palette.primaryAccent else palette.surface,
-                            border = if (active) null else BorderStroke(1.dp, palette.border)
+                            border = if (active) null else BorderStroke(1.dp, palette.cardBorderBrush)
                         ) {
                             Box(
                                 modifier = Modifier.padding(horizontal = 11.dp),
@@ -1172,12 +1325,26 @@ fun AccountAnalyticsScreen(
             }
         }
 
-        item {
+        item(key = "analytics_hero") {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .shadow(
+                        elevation = 14.dp,
+                        shape = RoundedCornerShape(24.dp),
+                        ambientColor = palette.heroShadowColor,
+                        spotColor = palette.heroShadowColor
+                    )
                     .clip(RoundedCornerShape(24.dp))
                     .background(heroGradient)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(Color.White.copy(alpha = 0.14f), Color.Transparent),
+                            center = Offset(120f, 60f),
+                            radius = 650f
+                        )
+                    )
+                    .border(1.dp, palette.heroBorderBrush, RoundedCornerShape(24.dp))
                     .padding(22.dp)
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -1198,7 +1365,7 @@ fun AccountAnalyticsScreen(
                             color = Color.White.copy(alpha = 0.16f)
                         ) {
                             Text(
-                                text = "${accountTxns.size} TXNS",
+                                text = if (scopeFilter == "CYCLE") "${accountTxns.size} THIS CYCLE" else "${accountTxns.size} ALL TIME",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 0.6.sp,
@@ -1212,7 +1379,7 @@ fun AccountAnalyticsScreen(
 
                     Text(
                         text = "AED ${String.format("%,.2f", totalPeriodSpend)}",
-                        fontSize = 36.sp,
+                        fontSize = 35.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = (-1).sp,
                         color = Color.White
@@ -1275,12 +1442,19 @@ fun AccountAnalyticsScreen(
             }
         }
 
-        item {
+        item(key = "analytics_donut_card") {
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .shadow(
+                        elevation = 6.dp,
+                        shape = RoundedCornerShape(22.dp),
+                        ambientColor = palette.shadowColor,
+                        spotColor = palette.shadowColor
+                    ),
                 shape = RoundedCornerShape(22.dp),
                 color = palette.surface,
-                border = BorderStroke(1.dp, palette.border)
+                border = BorderStroke(1.dp, palette.cardBorderBrush)
             ) {
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(20.dp),
@@ -1384,7 +1558,7 @@ fun AccountAnalyticsScreen(
                                     .clickable {
                                         selectedCategory = if (isSelected) null else tag
                                     }
-                                    .padding(vertical = 4.dp, horizontal = if (isSelected) 8.dp else 0.dp)
+                                    .padding(vertical = 6.dp, horizontal = if (isSelected) 10.dp else 0.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -1456,7 +1630,7 @@ fun AccountAnalyticsScreen(
             }
         }
 
-        item {
+        item(key = "analytics_txns_header") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1487,7 +1661,7 @@ fun AccountAnalyticsScreen(
 
 /**
  * Single Vault Transaction Drill-Down Screen:
- * Shifts the tapped Vault Card up to the top and reveals all current-cycle transactions that affected it.
+ * Smoothly shifts the selected Vault Card to the top and displays its affecting transactions.
  */
 @Composable
 fun VaultDetailScreen(
@@ -1508,10 +1682,10 @@ fun VaultDetailScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 18.dp),
-        contentPadding = PaddingValues(top = 20.dp, bottom = 32.dp),
+        contentPadding = PaddingValues(top = 20.dp, bottom = 36.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item {
+        item(key = "vault_detail_header") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1521,11 +1695,12 @@ fun VaultDetailScreen(
                     Surface(
                         modifier = Modifier
                             .height(36.dp)
+                            .shadow(2.dp, RoundedCornerShape(12.dp), ambientColor = palette.shadowColor, spotColor = palette.shadowColor)
                             .clip(RoundedCornerShape(12.dp))
                             .clickable { onBack() },
                         shape = RoundedCornerShape(12.dp),
                         color = palette.surface,
-                        border = BorderStroke(1.dp, palette.border)
+                        border = BorderStroke(1.dp, palette.cardBorderBrush)
                     ) {
                         Box(
                             modifier = Modifier.padding(horizontal = 11.dp),
@@ -1556,17 +1731,19 @@ fun VaultDetailScreen(
             }
         }
 
-        item {
+        item(key = "vault_detail_card") {
             VaultItemCard(vault = vault, onClick = { onBack() })
         }
 
         if (affectingTxns.isEmpty()) {
-            item {
+            item(key = "vault_detail_empty") {
                 Surface(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .shadow(4.dp, RoundedCornerShape(18.dp), ambientColor = palette.shadowColor, spotColor = palette.shadowColor),
                     shape = RoundedCornerShape(18.dp),
                     color = palette.surface,
-                    border = BorderStroke(1.dp, palette.border)
+                    border = BorderStroke(1.dp, palette.cardBorderBrush)
                 ) {
                     Text(
                         text = "No transactions affected ${formatVaultLabel(vault.vaultKey)} in the current cycle.",
@@ -2288,11 +2465,17 @@ fun VaultItemCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .shadow(
+                elevation = 5.dp,
+                shape = RoundedCornerShape(18.dp),
+                ambientColor = palette.shadowColor,
+                spotColor = palette.shadowColor
+            )
             .clip(RoundedCornerShape(18.dp))
-            .clickable { onClick() },
+            .tactileCardPress { onClick() },
         shape = RoundedCornerShape(18.dp),
         color = palette.surface,
-        border = BorderStroke(1.dp, palette.border)
+        border = BorderStroke(1.dp, palette.cardBorderBrush)
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(18.dp)) {
             Row(
@@ -2388,11 +2571,17 @@ fun TransactionRowCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .shadow(
+                elevation = 3.dp,
+                shape = RoundedCornerShape(16.dp),
+                ambientColor = palette.shadowColor,
+                spotColor = palette.shadowColor
+            )
             .clip(RoundedCornerShape(16.dp))
-            .clickable { onClick() },
+            .tactileCardPress { onClick() },
         shape = RoundedCornerShape(16.dp),
         color = palette.surface,
-        border = BorderStroke(1.dp, palette.border)
+        border = BorderStroke(1.dp, palette.cardBorderBrush)
     ) {
         Row(
             modifier = Modifier
