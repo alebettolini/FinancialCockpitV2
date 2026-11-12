@@ -125,7 +125,8 @@ private fun CockpitWidgetContent(
     vaults: List<VaultBalanceEntity>
 ) {
     val size = LocalSize.current
-    val isNarrow = size.width < 225.dp
+    val isNarrow = size.width < 195.dp
+    val isMedium = size.width >= 195.dp && size.width < 275.dp
     val isShort = size.height < 115.dp
     val isTall = size.height >= 235.dp
 
@@ -158,7 +159,7 @@ private fun CockpitWidgetContent(
         .filter { it.allocatedAmount > 0.0 || it.currentRemaining > 0.0 }
 
     when {
-        // 1. TINY SQUARE (e.g. 2x1): Priority #1 (Usable Cash + Daily Pace stacked vertically so nothing clips)
+        // 1. TINY SQUARE (2x1)
         isNarrow && isShort -> {
             Row(
                 modifier = GlanceModifier
@@ -172,20 +173,12 @@ private fun CockpitWidgetContent(
                 Column(modifier = GlanceModifier.defaultWeight()) {
                     Text(
                         text = "AED ${String.format("%,.0f", usableCash)}",
-                        style = TextStyle(
-                            color = ColorProvider(Color(0xFF00E676)),
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
-                        ),
+                        style = TextStyle(color = ColorProvider(Color(0xFF00E676)), fontSize = 18.sp, fontWeight = FontWeight.Bold),
                         maxLines = 1
                     )
                     Text(
-                        text = "AED ${String.format("%.0f", dailySafe)}/day",
-                        style = TextStyle(
-                            color = ColorProvider(Color.White),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        ),
+                        text = "AED ${String.format("%.0f", dailySafe)}/d",
+                        style = TextStyle(color = ColorProvider(Color.White), fontSize = 12.sp, fontWeight = FontWeight.Medium),
                         maxLines = 1
                     )
                 }
@@ -193,7 +186,7 @@ private fun CockpitWidgetContent(
             }
         }
 
-        // 2. NARROW TALL (e.g. 2x2 or 2x3): Vertical single-column stack (zero horizontal crowding)
+        // 2. NARROW TALL (2x2 / 2x3)
         isNarrow && !isShort -> {
             Column(
                 modifier = GlanceModifier
@@ -224,7 +217,7 @@ private fun CockpitWidgetContent(
                 )
                 Text(
                     text = "AED ${String.format("%,.0f", usableCash)}",
-                    style = TextStyle(color = ColorProvider(Color(0xFF00E676)), fontSize = 21.sp, fontWeight = FontWeight.Bold),
+                    style = TextStyle(color = ColorProvider(Color(0xFF00E676)), fontSize = 20.sp, fontWeight = FontWeight.Bold),
                     maxLines = 1
                 )
 
@@ -236,7 +229,7 @@ private fun CockpitWidgetContent(
                     maxLines = 1
                 )
                 Text(
-                    text = "AED ${String.format("%.0f", dailySafe)}/day",
+                    text = "AED ${String.format("%.0f", dailySafe)}/d",
                     style = TextStyle(color = ColorProvider(Color.White), fontSize = 15.sp, fontWeight = FontWeight.Bold),
                     maxLines = 1
                 )
@@ -272,7 +265,7 @@ private fun CockpitWidgetContent(
             }
         }
 
-        // 3. WIDE COMPACT BAR (e.g. 3x1 or 4x1): Clean titles + primary metrics, zero truncation
+        // 3. WIDE COMPACT BAR (3x1 / 4x1)
         !isNarrow && isShort -> {
             Row(
                 modifier = GlanceModifier
@@ -306,7 +299,7 @@ private fun CockpitWidgetContent(
                         maxLines = 1
                     )
                     Text(
-                        text = "AED ${String.format("%.0f", dailySafe)}/day",
+                        text = "AED ${String.format("%.0f", dailySafe)}/d",
                         style = TextStyle(color = ColorProvider(Color.White), fontSize = 15.sp, fontWeight = FontWeight.Bold),
                         maxLines = 1
                     )
@@ -316,14 +309,14 @@ private fun CockpitWidgetContent(
             }
         }
 
-        // 4. STANDARD (4x2 / 5x2) & EXPANDED (4x3 / 5x3) COCKPIT
+        // 4. MEDIUM (3x2 / 3x3) & WIDE (4x2 / 5x2 / 4x3) COCKPIT
         else -> {
             Column(
                 modifier = GlanceModifier
                     .fillMaxSize()
                     .background(ColorProvider(Color(0xFF121214)))
                     .cornerRadius(18.dp)
-                    .padding(14.dp)
+                    .padding(if (isMedium) 12.dp else 14.dp)
                     .clickable(actionStartActivity<MainActivity>())
             ) {
                 // Header: Mode + Sync
@@ -333,16 +326,20 @@ private fun CockpitWidgetContent(
                 ) {
                     Text(
                         text = "● ${activeMode.first}",
-                        style = TextStyle(color = ColorProvider(modeColor), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                        style = TextStyle(
+                            color = ColorProvider(modeColor),
+                            fontSize = if (isMedium) 9.sp else 10.sp,
+                            fontWeight = FontWeight.Bold
+                        ),
                         maxLines = 1,
                         modifier = GlanceModifier.defaultWeight()
                     )
-                    SyncPill(compact = false)
+                    SyncPill(compact = isMedium)
                 }
 
                 Spacer(modifier = GlanceModifier.height(6.dp))
 
-                // Hero Row: Clean Titles + Primary Numbers only
+                // Hero Row: Scales typography cleanly at 3 columns so AED never truncates
                 Row(
                     modifier = GlanceModifier.fillMaxWidth(),
                     verticalAlignment = Alignment.Vertical.Bottom
@@ -350,25 +347,33 @@ private fun CockpitWidgetContent(
                     Column(modifier = GlanceModifier.defaultWeight()) {
                         Text(
                             text = "USABLE CASH",
-                            style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                            style = TextStyle(color = ColorProvider(Color.White), fontSize = if (isMedium) 9.sp else 10.sp, fontWeight = FontWeight.Bold),
                             maxLines = 1
                         )
                         Text(
                             text = "AED ${String.format("%,.0f", usableCash)}",
-                            style = TextStyle(color = ColorProvider(Color(0xFF00E676)), fontSize = 25.sp, fontWeight = FontWeight.Bold),
+                            style = TextStyle(
+                                color = ColorProvider(Color(0xFF00E676)),
+                                fontSize = if (isMedium) 20.sp else 25.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
                             maxLines = 1
                         )
                     }
 
                     Column(horizontalAlignment = Alignment.Horizontal.End) {
                         Text(
-                            text = "DAILY PACE (${daysLeft}D)",
-                            style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                            text = "DAILY (${daysLeft}D)",
+                            style = TextStyle(color = ColorProvider(Color.White), fontSize = if (isMedium) 9.sp else 10.sp, fontWeight = FontWeight.Bold),
                             maxLines = 1
                         )
                         Text(
-                            text = "AED ${String.format("%.0f", dailySafe)}/day",
-                            style = TextStyle(color = ColorProvider(Color.White), fontSize = 16.sp, fontWeight = FontWeight.Bold),
+                            text = if (isMedium) "AED ${String.format("%.0f", dailySafe)}/d" else "AED ${String.format("%.0f", dailySafe)}/day",
+                            style = TextStyle(
+                                color = ColorProvider(Color.White),
+                                fontSize = if (isMedium) 14.sp else 16.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
                             maxLines = 1
                         )
                     }
@@ -378,7 +383,6 @@ private fun CockpitWidgetContent(
 
                 // Progressive Middle Telemetry
                 if (isTall) {
-                    // Cash Runway Bar
                     val cashPct = if (cyclePool > 0.0) (usableCash / cyclePool).toFloat().coerceIn(0f, 1f) else 0.43f
                     Column(modifier = GlanceModifier.fillMaxWidth().padding(bottom = 6.dp)) {
                         Row(modifier = GlanceModifier.fillMaxWidth()) {
@@ -403,13 +407,12 @@ private fun CockpitWidgetContent(
                         )
                     }
 
-                    // Top 3 Vault Bars
                     activeVaults.take(3).forEach { vault ->
                         val frac = if (vault.allocatedAmount > 0.0) (vault.currentRemaining / vault.allocatedAmount).toFloat().coerceIn(0f, 1f) else 0f
                         Column(modifier = GlanceModifier.fillMaxWidth().padding(bottom = 6.dp)) {
                             Row(modifier = GlanceModifier.fillMaxWidth()) {
                                 Text(
-                                    text = vaultDisplayName(vault.vaultKey),
+                                    text = if (isMedium) vaultShortName(vault.vaultKey) else vaultDisplayName(vault.vaultKey),
                                     style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Medium),
                                     maxLines = 1,
                                     modifier = GlanceModifier.defaultWeight()
@@ -430,7 +433,6 @@ private fun CockpitWidgetContent(
                         }
                     }
 
-                    // Card 3445 Utilization Bar
                     val ccUtil = (totalCcOwed / ccLimit).toFloat().coerceIn(0f, 1f)
                     Column(modifier = GlanceModifier.fillMaxWidth()) {
                         Row(modifier = GlanceModifier.fillMaxWidth()) {
@@ -454,8 +456,35 @@ private fun CockpitWidgetContent(
                             backgroundColor = ColorProvider(Color(0xFF242426))
                         )
                     }
+                } else if (isMedium) {
+                    // 3-Column 2-Row Height: Stack top 2 Vault Bars vertically so "Sustenance" never truncates
+                    activeVaults.take(2).forEachIndexed { idx, vault ->
+                        val frac = if (vault.allocatedAmount > 0.0) (vault.currentRemaining / vault.allocatedAmount).toFloat().coerceIn(0f, 1f) else 0f
+                        Column(modifier = GlanceModifier.fillMaxWidth().padding(bottom = if (idx == 0) 6.dp else 0.dp)) {
+                            Row(modifier = GlanceModifier.fillMaxWidth()) {
+                                Text(
+                                    text = vaultShortName(vault.vaultKey),
+                                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Medium),
+                                    maxLines = 1,
+                                    modifier = GlanceModifier.defaultWeight()
+                                )
+                                Text(
+                                    text = "AED ${String.format("%,.0f", vault.currentRemaining)}",
+                                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                    maxLines = 1
+                                )
+                            }
+                            Spacer(modifier = GlanceModifier.height(2.dp))
+                            LinearProgressIndicator(
+                                progress = frac,
+                                modifier = GlanceModifier.fillMaxWidth().height(4.dp),
+                                color = ColorProvider(vaultBarColor(vault.vaultKey)),
+                                backgroundColor = ColorProvider(Color(0xFF242426))
+                            )
+                        }
+                    }
                 } else {
-                    // Standard 2-Row Height: Side-by-side Top 2 Vault Bars
+                    // Wide 4/5-Column 2-Row Height: Side-by-side Top 2 Vault Bars
                     val topTwo = activeVaults.take(2)
                     if (topTwo.isNotEmpty()) {
                         Row(
@@ -497,12 +526,17 @@ private fun CockpitWidgetContent(
 
                 Spacer(modifier = GlanceModifier.defaultWeight())
 
-                // Footer Row: CC Status + Unbilled (always visible)
+                // Footer Row: CC Status + Unbilled
                 Row(
                     modifier = GlanceModifier.fillMaxWidth(),
                     verticalAlignment = Alignment.Vertical.CenterVertically
                 ) {
-                    val billText = if (billedDue <= 0.01) "CC Bill: PAID ✓" else "CC Due: AED ${String.format("%,.0f", billedDue)}"
+                    val billText = when {
+                        billedDue <= 0.01 && isMedium -> "CC: PAID ✓"
+                        billedDue <= 0.01 -> "CC Bill: PAID ✓"
+                        isMedium -> "Due: ${String.format("%,.0f", billedDue)}"
+                        else -> "CC Due: AED ${String.format("%,.0f", billedDue)}"
+                    }
                     val billColor = if (billedDue <= 0.01) Color(0xFF00E676) else Color(0xFFFF9F0A)
 
                     Text(
@@ -512,7 +546,7 @@ private fun CockpitWidgetContent(
                         modifier = GlanceModifier.defaultWeight()
                     )
                     Text(
-                        text = "Unbilled: AED ${String.format("%,.0f", unbilled)}",
+                        text = if (isMedium) "Unbilled: ${String.format("%,.0f", unbilled)}" else "Unbilled: AED ${String.format("%,.0f", unbilled)}",
                         style = TextStyle(color = ColorProvider(Color(0xFFFF453A)), fontSize = 10.sp, fontWeight = FontWeight.Bold),
                         maxLines = 1
                     )
