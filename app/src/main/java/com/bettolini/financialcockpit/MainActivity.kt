@@ -101,6 +101,18 @@ class MainActivity : ComponentActivity() {
                     val usableCashToday = (checkingCash - currentStatementDue).coerceAtLeast(0.0)
                     val safeDaily = (usableCashToday / daysUntilPayday.toDouble()).coerceAtLeast(0.0)
 
+                    var simulatedModeOverride by remember { mutableStateOf<Pair<String, String>?>(null) }
+                    val liveMode = DynamicAllocationEngine.getLiveModeBadge(usableCashToday)
+                    val activeMode = simulatedModeOverride ?: liveMode
+
+                    val modeAccentColor = when (activeMode.first) {
+                        "APEX WEALTH MODE" -> Color(0xFFFFD60A)
+                        "BRIDGE VELOCITY" -> Color(0xFF388AF6)
+                        "CRUISING ALTITUDE" -> Color(0xFF5AC8FA)
+                        "STEADY RUNWAY" -> Color(0xFF00E676)
+                        else -> Color(0xFFFF9F0A)
+                    }
+
                     val expectedSalary = 9750.00
                     val autoLoanEmi = 1594.00
                     val nextMonthCcCommitment = if (unbilledVal > 1000.0) 147.00 else unbilledVal
@@ -135,6 +147,7 @@ class MainActivity : ComponentActivity() {
 
                                 FilledTonalButton(
                                     onClick = {
+                                        simulatedModeOverride = null
                                         if (hasSmsPermission) {
                                             coroutineScope.launch {
                                                 val count = SmsHistoryScanner.scanAndSyncInbox(context)
@@ -156,7 +169,47 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(18.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Live Cockpit Mode Status Pill
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                color = modeAccentColor.copy(alpha = 0.10f),
+                                border = BorderStroke(1.dp, modeAccentColor.copy(alpha = 0.35f))
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 9.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .background(modeAccentColor, CircleShape)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "MODE: ${activeMode.first}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Black,
+                                            letterSpacing = 0.8.sp,
+                                            color = modeAccentColor
+                                        )
+                                    }
+                                    Text(
+                                        text = activeMode.second,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = Color(0xFFD1D1D6)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
 
                             // 1. True Usable Cash Card
                             Card(
@@ -327,6 +380,7 @@ class MainActivity : ComponentActivity() {
                                     onClick = {
                                         coroutineScope.launch {
                                             val alloc = DynamicAllocationEngine.calculateDynamicSplit(9750.0)
+                                            simulatedModeOverride = alloc.allocationMode to alloc.modeSubtitle
                                             dao.updateVaultBalances(listOf(
                                                 VaultBalanceEntity("RENT", alloc.rentVault, 0.0, alloc.rentVault),
                                                 VaultBalanceEntity("FIXED_OVERHEAD", alloc.fixedOverheadVault, 0.0, alloc.fixedOverheadVault),
@@ -351,6 +405,7 @@ class MainActivity : ComponentActivity() {
                                     onClick = {
                                         coroutineScope.launch {
                                             val alloc = DynamicAllocationEngine.calculateDynamicSplit(17000.0)
+                                            simulatedModeOverride = alloc.allocationMode to alloc.modeSubtitle
                                             dao.updateVaultBalances(listOf(
                                                 VaultBalanceEntity("RENT", alloc.rentVault, 0.0, alloc.rentVault),
                                                 VaultBalanceEntity("FIXED_OVERHEAD", alloc.fixedOverheadVault, 0.0, alloc.fixedOverheadVault),

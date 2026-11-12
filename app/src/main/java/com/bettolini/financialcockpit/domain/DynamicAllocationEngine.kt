@@ -7,7 +7,8 @@ data class VaultAllocation(
     val discretionaryVault: Double,
     val travelVault: Double,
     val wealthSurplusVault: Double,
-    val allocationMode: String
+    val allocationMode: String,
+    val modeSubtitle: String
 )
 
 object DynamicAllocationEngine {
@@ -19,11 +20,22 @@ object DynamicAllocationEngine {
     const val RENT_TARGET = 5000.00
     const val TRAVEL_TARGET = 1500.00
 
+    fun getLiveModeBadge(usableCash: Double): Pair<String, String> {
+        val safe = usableCash.coerceAtLeast(0.0)
+        return when {
+            safe < 1500.0 -> "TACTICAL CRUISE" to "Essentials & Commute Only"
+            safe < 4500.0 -> "STEADY RUNWAY" to "Bills Covered • Lean Daily Pace"
+            safe < 8000.0 -> "CRUISING ALTITUDE" to "Full Sustenance & Buffer"
+            safe < 15500.0 -> "BRIDGE VELOCITY" to "Pre-Raise Surplus Mode"
+            else -> "APEX WEALTH MODE" to "Full Architecture + Rent Vault"
+        }
+    }
+
     fun calculateDynamicSplit(availableCash: Double): VaultAllocation {
         val safeCash = availableCash.coerceAtLeast(0.0)
         return when {
-            // DEFCON 1: Under 2,000 AED - Pure Sustenance & Commute Floor
-            safeCash <= 2000.0 -> {
+            // Tier 1: Under 1,500 AED - Pure Sustenance & Commute
+            safeCash < 1500.0 -> {
                 VaultAllocation(
                     rentVault = 0.0,
                     fixedOverheadVault = 0.0,
@@ -31,12 +43,13 @@ object DynamicAllocationEngine {
                     discretionaryVault = 0.0,
                     travelVault = 0.0,
                     wealthSurplusVault = 0.0,
-                    allocationMode = "DEFCON 1: Essential Sustenance Only"
+                    allocationMode = "TACTICAL CRUISE",
+                    modeSubtitle = "Essentials & Commute Only"
                 )
             }
 
-            // DEFCON 2: 2,001 to 4,500 AED - Protect Auto Loan & Keep Wheels Moving
-            safeCash <= 4500.0 -> {
+            // Tier 2: 1,500 to 4,499 AED - Debt Service & Commute Runway (No Rent Lock)
+            safeCash < 4500.0 -> {
                 val toOverhead = AUTO_LOAN_PAYMENT.coerceAtMost(safeCash)
                 val remaining = (safeCash - toOverhead).coerceAtLeast(0.0)
                 VaultAllocation(
@@ -46,54 +59,55 @@ object DynamicAllocationEngine {
                     discretionaryVault = 0.0,
                     travelVault = 0.0,
                     wealthSurplusVault = 0.0,
-                    allocationMode = "DEFCON 2: Debt Service & Commute"
+                    allocationMode = "STEADY RUNWAY",
+                    modeSubtitle = "Bills Covered • Lean Daily Pace"
                 )
             }
 
-            // DEFCON 3: 4,501 to 8,000 AED - Normalizing Living
-            safeCash <= 8000.0 -> {
-                val overhead = FIXED_OVERHEAD_FULL
-                val sustenance = 2300.00.coerceAtMost((safeCash - overhead).coerceAtLeast(0.0))
-                val pool = (safeCash - overhead - sustenance).coerceAtLeast(0.0)
+            // Tier 3: 4,500 to 7,999 AED - Full Overhead + Sustenance & Discretionary (No Rent Lock)
+            safeCash < 8000.0 -> {
+                val overhead = FIXED_OVERHEAD_FULL.coerceAtMost(safeCash)
+                val afterOverhead = (safeCash - overhead).coerceAtLeast(0.0)
+                val sustenance = (afterOverhead * 0.72).coerceAtMost(SUSTENANCE_FLEET_FULL)
+                val discretionary = (afterOverhead - sustenance).coerceAtLeast(0.0)
 
                 VaultAllocation(
-                    rentVault = pool * 0.50,
+                    rentVault = 0.0,
                     fixedOverheadVault = overhead,
                     sustenanceFleetVault = sustenance,
-                    discretionaryVault = pool * 0.50,
+                    discretionaryVault = discretionary,
                     travelVault = 0.0,
                     wealthSurplusVault = 0.0,
-                    allocationMode = "DEFCON 3: Sustenance & Baseline Buffer"
+                    allocationMode = "CRUISING ALTITUDE",
+                    modeSubtitle = "Full Sustenance & Buffer"
                 )
             }
 
-            // BRIDGE MODE: 8,001 to 15,499 AED (Pre-raise net salary ~AED 9,750)
+            // Tier 4: 8,000 to 15,499 AED - Bridge Velocity (Pre-Raise ~AED 9,750 Salary, No Rent Lock)
             safeCash < 15500.0 -> {
                 val overhead = FIXED_OVERHEAD_FULL
                 val sustenance = SUSTENANCE_FLEET_FULL
                 var remaining = (safeCash - overhead - sustenance).coerceAtLeast(0.0)
 
-                val rent = 2500.00.coerceAtMost(remaining)
-                remaining -= rent
-
-                val discretionary = 800.00.coerceAtMost(remaining)
+                val discretionary = DISCRETIONARY_FULL.coerceAtMost(remaining)
                 remaining -= discretionary
 
-                val travel = 500.00.coerceAtMost(remaining)
+                val travel = 1000.00.coerceAtMost(remaining)
                 remaining -= travel
 
                 VaultAllocation(
-                    rentVault = rent,
+                    rentVault = 0.0,
                     fixedOverheadVault = overhead,
                     sustenanceFleetVault = sustenance,
                     discretionaryVault = discretionary,
                     travelVault = travel,
                     wealthSurplusVault = remaining.coerceAtLeast(0.0),
-                    allocationMode = "Bridge Mode (Pre-Raise Baseline)"
+                    allocationMode = "BRIDGE VELOCITY",
+                    modeSubtitle = "Pre-Raise Surplus Mode"
                 )
             }
 
-            // TARGET ARCHITECTURE: 15,500+ AED (Full AED 17k+ Raise)
+            // Tier 5: 15,500+ AED - Apex Wealth Mode (Post-Raise AED 17k+ Salary, Rent Vault Active)
             else -> {
                 var remaining = (safeCash - FIXED_OVERHEAD_FULL - SUSTENANCE_FLEET_FULL).coerceAtLeast(0.0)
 
@@ -113,7 +127,8 @@ object DynamicAllocationEngine {
                     discretionaryVault = discretionary,
                     travelVault = travel,
                     wealthSurplusVault = remaining.coerceAtLeast(0.0),
-                    allocationMode = "Target Wealth & Growth Architecture"
+                    allocationMode = "APEX WEALTH MODE",
+                    modeSubtitle = "Full Architecture + Rent Vault"
                 )
             }
         }
