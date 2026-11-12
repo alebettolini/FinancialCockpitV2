@@ -67,6 +67,9 @@ class MainActivity : ComponentActivity() {
             var themeMode by remember {
                 mutableStateOf(prefs.getString("theme_mode", "SYSTEM") ?: "SYSTEM")
             }
+            var widgetMono by remember {
+                mutableStateOf(prefs.getBoolean("widget_mono", false))
+            }
             val systemDark = isSystemInDarkTheme()
             val isDark = when (themeMode) {
                 "DARK" -> true
@@ -164,6 +167,29 @@ class MainActivity : ComponentActivity() {
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
+                                        // Widget Color/Mono Pill
+                                        Surface(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .clickable {
+                                                    val nextMono = !widgetMono
+                                                    widgetMono = nextMono
+                                                    prefs.edit().putBoolean("widget_mono", nextMono).apply()
+                                                    coroutineScope.launch { CockpitWidget().updateAll(context) }
+                                                },
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = palette.surface,
+                                            border = BorderStroke(1.dp, palette.border)
+                                        ) {
+                                            Text(
+                                                text = if (widgetMono) "◈ Mono" else "◈ Color",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = palette.textPrimary,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp)
+                                            )
+                                        }
+
                                         // Theme Cycle Pill (Auto -> Light -> Dark)
                                         Surface(
                                             modifier = Modifier
@@ -176,6 +202,7 @@ class MainActivity : ComponentActivity() {
                                                     }
                                                     themeMode = next
                                                     prefs.edit().putString("theme_mode", next).apply()
+                                                    coroutineScope.launch { CockpitWidget().updateAll(context) }
                                                 },
                                             shape = RoundedCornerShape(12.dp),
                                             color = palette.surface,
