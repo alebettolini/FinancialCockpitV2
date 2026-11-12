@@ -5,11 +5,14 @@ import android.provider.Telephony
 import com.bettolini.financialcockpit.domain.ClassificationResult
 import com.bettolini.financialcockpit.domain.DynamicAllocationEngine
 import com.bettolini.financialcockpit.domain.MerchantClassifier
+import com.bettolini.financialcockpit.domain.PacingNudgeEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import kotlin.math.abs
 
 object SmsHistoryScanner {
@@ -22,6 +25,11 @@ object SmsHistoryScanner {
         }
     }
 
+    fun formatCycleRangeLabel(cycleStart: LocalDate): String {
+        val fmt = DateTimeFormatter.ofPattern("dd MMM")
+        return "${cycleStart.format(fmt)} – ${cycleStart.plusMonths(1).minusDays(1).format(fmt)}"
+    }
+
     suspend fun scanAndSyncInbox(context: Context): Int = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
         val dao = AppDatabase.getInstance(context).financeDao()
@@ -29,7 +37,9 @@ object SmsHistoryScanner {
         val today = LocalDate.now(zone)
         val cycleStartDate = getCurrentCycleStart(today)
         val cycleStartMillis = cycleStartDate.atStartOfDay(zone).toInstant().toEpochMilli()
-        val cycleLabel = "Cycle: ${cycleStartDate.format(DateTimeFormatter.ofPattern("dd MMM"))} – ${cycleStartDate.plusMonths(1).minusDays(1).format(DateTimeFormatter.ofPattern("dd MMM"))}"
+        val cycleLabel = "Cycle: ${formatCycleRangeLabel(cycleStartDate)}"
+
+        val userRules = dao.getAllMerchantRulesSync()
 
         val cursor = resolver.query(
             Telephony.Sms.Inbox.CONTENT_URI,
@@ -39,13 +49,13 @@ object SmsHistoryScanner {
             "${Telephony.Sms.DATE} ASC"
         ) ?: return@withContext 0
 
-        var detectedDebitBalance = 6296.29
+        var detectedDebitBalance = 2737.93
         var lastDebitBalanceTimestamp = 0L
 
-        var detectedCreditAvlLimit = 33454.19
+        var detectedCreditAvlLimit = 37012.55
         var lastCreditLimitTimestamp = 0L
 
-        var detectedStatementDue = 3620.45
+        var detectedStatementDue = 0.0
         var lastStatementTimestamp = 0L
         var detectedDueDate = "19 Nov"
         var paymentAppliedThisCycle = false
@@ -102,13 +112,11 @@ object SmsHistoryScanner {
                 val date = c.getLong(dateIndex)
 
                 if (address.contains("ENBD", true) || address.contains("EmiratesNBD", true)) {
-                    // 1. Intercept Account-to-Credit-Card Settlement SMS first
                     val ccTransferMatch = ccTransferRegex.find(body)
                     if (ccTransferMatch != null) {
                         val paid = ccTransferMatch.groupValues[1].replace(",", "").toDoubleOrNull() ?: 0.0
                         val cardLast4 = ccTransferMatch.groupValues[3]
 
-                        // Deduct from checking if no newer SMS reported an explicit Avl Balance
                         if (paid > 0.0 && date > lastDebitBalanceTimestamp) {
                             detectedDebitBalance = (detectedDebitBalance - paid).coerceAtLeast(0.0)
                         }
@@ -153,7 +161,6 @@ object SmsHistoryScanner {
                             body.contains("Limit", true)
                     )
 
-                    // 2. Live Checking Account Balance
                     val debitBalMatch = debitBalanceRegex.find(body)
                     if (debitBalMatch != null && !isCredit) {
                         debitBalMatch.groupValues[1].replace(",", "").toDoubleOrNull()?.let {
@@ -162,7 +169,6 @@ object SmsHistoryScanner {
                         }
                     }
 
-                    // 3. Credit Card Available Limit
                     val creditLimMatch = creditLimitRegex.find(body)
                     val parsedLimitInMsg = creditLimMatch?.groupValues?.get(1)?.replace(",", "")?.toDoubleOrNull()
                     if (parsedLimitInMsg != null) {
@@ -170,7 +176,6 @@ object SmsHistoryScanner {
                         lastCreditLimitTimestamp = date
                     }
 
-                    // 4. Monthly Statement Generated
                     val statementMatch = statementRegex.find(body)
                     if (statementMatch != null && isCredit) {
                         statementMatch.groupValues[1].replace(",", "").toDoubleOrNull()?.let {
@@ -184,7 +189,6 @@ object SmsHistoryScanner {
                         }
                     }
 
-                    // 5. Credit Card Payment Receipt SMS
                     val paymentMatch = ccPaymentRegex.find(body)
                     if (paymentMatch != null && isCredit) {
                         val paid = paymentMatch.groupValues[1].replace(",", "").toDoubleOrNull() ?: 0.0
@@ -202,7 +206,6 @@ object SmsHistoryScanner {
                         continue
                     }
 
-                    // 6. Post-Statement Credit Card Refunds / Credits (offsets Billed Due)
                     val isPaymentReceipt = body.contains("received towards", true) || body.contains("Payment of", true)
                     if (isCredit && !isPaymentReceipt) {
                         val refundMatch = ccCreditRefundRegex.find(body)
@@ -221,7 +224,6 @@ object SmsHistoryScanner {
                         }
                     }
 
-                    // 7. Standard Card / Account Spend Transaction
                     val isCcBillTransfer = body.contains("Credit Card payment", true) ||
                             body.contains("Card Payment", true) ||
                             body.contains("towards payment of your Credit Card", true)
@@ -242,7 +244,18 @@ object SmsHistoryScanner {
                                 cleanMerchant = "ENBD Card 3445 Repayment"
                             )
                         } else {
-                            MerchantClassifier.classify(rawMerchant, body, isCredit)
+                            val base = MerchantClassifier.classify(rawMerchant, body, isCredit)
+                            val upperMerchant = base.cleanMerchant.uppercase()
+                            val matchedRule = userRules.firstOrNull { rule ->
+                                upperMerchant == rule.merchantKey ||
+                                        upperMerchant.contains(rule.merchantKey) ||
+                                        body.uppercase().contains(rule.merchantKey)
+                            }
+                            if (matchedRule != null) {
+                                base.copy(vaultKey = matchedRule.vaultKey, subTag = matchedRule.subTag)
+                            } else {
+                                base
+                            }
                         }
 
                         parsedTransactions.add(
@@ -263,17 +276,137 @@ object SmsHistoryScanner {
             }
         }
 
-        // Clear any sub-AED 100 residual statement dust (e.g., AED 62.09 pre-cutover refund) once a bill payment settles
         if (paymentAppliedThisCycle && detectedStatementDue < 100.0) {
             detectedStatementDue = 0.0
         }
 
+        dao.clearTransactions()
+        dao.insertTransactions(parsedTransactions)
+
+        // Archive any closed historical cycles automatically
+        archiveClosedCycles(dao, parsedTransactions, cycleStartDate, zone)
+
+        // Reconcile vaults & snapshot
+        reconcileAndPersistState(
+            context = context,
+            dao = dao,
+            allTransactions = parsedTransactions,
+            detectedDebitBalance = detectedDebitBalance,
+            creditLimit = creditLimit,
+            detectedCreditAvlLimit = detectedCreditAvlLimit,
+            detectedStatementDue = detectedStatementDue,
+            detectedDueDate = detectedDueDate,
+            cycleLabel = cycleLabel,
+            evaluateNudges = true
+        )
+
+        return@withContext parsedTransactions.size
+    }
+
+    suspend fun recomputeLedgerFromDb(context: Context) = withContext(Dispatchers.IO) {
+        val dao = AppDatabase.getInstance(context).financeDao()
+        val snap = dao.getSnapshotSync() ?: return@withContext
+        val allTxns = dao.getAllTransactionsSync()
+
+        reconcileAndPersistState(
+            context = context,
+            dao = dao,
+            allTransactions = allTxns,
+            detectedDebitBalance = snap.liveDebitBalance,
+            creditLimit = snap.creditCardLimit,
+            detectedCreditAvlLimit = snap.creditAvailableLimit,
+            detectedStatementDue = snap.statementDue,
+            detectedDueDate = snap.statementDueDate,
+            cycleLabel = snap.cycleLabel,
+            evaluateNudges = false
+        )
+    }
+
+    suspend fun captureCurrentCycleSnapshot(context: Context) = withContext(Dispatchers.IO) {
+        val dao = AppDatabase.getInstance(context).financeDao()
+        val snap = dao.getSnapshotSync() ?: return@withContext
+        val allTxns = dao.getAllTransactionsSync()
+        val cycleStart = getCurrentCycleStart()
+        val cycleKey = cycleStart.toString()
+
+        val cycleTxns = allTxns.filter { it.isCurrentCycle && !it.isInternalTransfer }
+        val checkingSpend = cycleTxns.filter { !it.isCreditCard }.sumOf { it.amount }
+        val creditSpend = cycleTxns.filter { it.isCreditCard }.sumOf { it.amount }
+        val topCategory = cycleTxns
+            .groupBy { it.subTag }
+            .maxByOrNull { entry -> entry.value.sumOf { it.amount } }
+            ?.key ?: "#General"
+        val usableCash = (snap.liveDebitBalance - snap.statementDue).coerceAtLeast(0.0)
+
+        dao.insertCycleSnapshot(
+            CycleSnapshotEntity(
+                cycleKey = cycleKey,
+                cycleLabel = formatCycleRangeLabel(cycleStart),
+                checkingSpend = checkingSpend,
+                creditSpend = creditSpend,
+                usableCashAtSnapshot = usableCash,
+                modeAtSnapshot = snap.allocationMode,
+                topCategory = topCategory,
+                capturedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
+    private suspend fun archiveClosedCycles(
+        dao: FinanceDao,
+        allTransactions: List<TransactionEntity>,
+        currentCycleStart: LocalDate,
+        zone: ZoneId
+    ) {
+        val closedByCycle = allTransactions
+            .filter { !it.isInternalTransfer }
+            .groupBy { txn ->
+                val d = Instant.ofEpochMilli(txn.timestamp).atZone(zone).toLocalDate()
+                getCurrentCycleStart(d)
+            }
+            .filterKeys { it.isBefore(currentCycleStart) }
+
+        if (closedByCycle.isEmpty()) return
+
+        val snapshots = closedByCycle.map { (cStart, txns) ->
+            val checkingSpend = txns.filter { !it.isCreditCard }.sumOf { it.amount }
+            val creditSpend = txns.filter { it.isCreditCard }.sumOf { it.amount }
+            val topCat = txns
+                .groupBy { it.subTag }
+                .maxByOrNull { entry -> entry.value.sumOf { it.amount } }
+                ?.key ?: "#General"
+
+            CycleSnapshotEntity(
+                cycleKey = cStart.toString(),
+                cycleLabel = formatCycleRangeLabel(cStart),
+                checkingSpend = checkingSpend,
+                creditSpend = creditSpend,
+                usableCashAtSnapshot = 0.0,
+                modeAtSnapshot = "CLOSED CYCLE",
+                topCategory = topCat,
+                capturedAt = System.currentTimeMillis()
+            )
+        }
+        dao.insertCycleSnapshotsIgnoreExisting(snapshots)
+    }
+
+    private suspend fun reconcileAndPersistState(
+        context: Context,
+        dao: FinanceDao,
+        allTransactions: List<TransactionEntity>,
+        detectedDebitBalance: Double,
+        creditLimit: Double,
+        detectedCreditAvlLimit: Double,
+        detectedStatementDue: Double,
+        detectedDueDate: String,
+        cycleLabel: String,
+        evaluateNudges: Boolean
+    ) {
         val creditTotalOwed = (creditLimit - detectedCreditAvlLimit).coerceAtLeast(0.0)
         val unbilledSpend = (creditTotalOwed - detectedStatementDue).coerceAtLeast(0.0)
         val trueUsableCash = (detectedDebitBalance - detectedStatementDue).coerceAtLeast(0.0)
 
-        // Separate Cash (Checking) spend from Credit Card (3445) spend in the current cycle
-        val cycleAllSpendTxns = parsedTransactions.filter { it.isCurrentCycle && !it.isInternalTransfer }
+        val cycleAllSpendTxns = allTransactions.filter { it.isCurrentCycle && !it.isInternalTransfer }
         val cycleCheckingTxns = cycleAllSpendTxns.filter { !it.isCreditCard }
         val cycleCreditTxns = cycleAllSpendTxns.filter { it.isCreditCard }
 
@@ -365,9 +498,24 @@ object SmsHistoryScanner {
         )
 
         dao.updateVaultBalances(updatedVaults)
-        dao.clearTransactions()
-        dao.insertTransactions(parsedTransactions)
 
-        return@withContext parsedTransactions.size
+        if (evaluateNudges) {
+            val today = LocalDate.now()
+            val payday = if (today.dayOfMonth < 22) today.withDayOfMonth(22) else today.plusMonths(1).withDayOfMonth(22)
+            val daysLeft = ChronoUnit.DAYS.between(today, payday).coerceAtLeast(1)
+            val safeDaily = (trueUsableCash / daysLeft.toDouble()).coerceAtLeast(0.0)
+            val liveMode = DynamicAllocationEngine.getLiveModeBadge(trueUsableCash)
+
+            PacingNudgeEngine.evaluateAndNotify(
+                context = context,
+                usableCash = trueUsableCash,
+                safeDaily = safeDaily,
+                statementDue = detectedStatementDue,
+                dueDateLabel = detectedDueDate,
+                activeMode = liveMode.first,
+                modeSubtitle = liveMode.second,
+                transactions = allTransactions
+            )
+        }
     }
 }

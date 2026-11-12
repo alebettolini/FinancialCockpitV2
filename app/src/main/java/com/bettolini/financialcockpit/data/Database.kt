@@ -43,6 +43,27 @@ data class AccountSnapshotEntity(
     val allocationMode: String
 )
 
+@Entity(tableName = "merchant_rules")
+data class MerchantRuleEntity(
+    @PrimaryKey val merchantKey: String,
+    val displayMerchant: String,
+    val vaultKey: String,
+    val subTag: String,
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "cycle_snapshots")
+data class CycleSnapshotEntity(
+    @PrimaryKey val cycleKey: String,
+    val cycleLabel: String,
+    val checkingSpend: Double,
+    val creditSpend: Double,
+    val usableCashAtSnapshot: Double,
+    val modeAtSnapshot: String,
+    val topCategory: String,
+    val capturedAt: Long = System.currentTimeMillis()
+)
+
 @Dao
 interface FinanceDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -51,8 +72,17 @@ interface FinanceDao {
     @Query("DELETE FROM transactions")
     suspend fun clearTransactions()
 
-    @Query("SELECT * FROM transactions ORDER BY timestamp DESC LIMIT 30")
+    @Query("SELECT * FROM transactions ORDER BY timestamp DESC LIMIT 120")
     fun getRecentTransactions(): Flow<List<TransactionEntity>>
+
+    @Query("SELECT * FROM transactions ORDER BY timestamp DESC")
+    suspend fun getAllTransactionsSync(): List<TransactionEntity>
+
+    @Query("UPDATE transactions SET deducedVault = :vaultKey, subTag = :subTag WHERE id = :txnId")
+    suspend fun updateSingleTransactionClassification(txnId: Long, vaultKey: String, subTag: String)
+
+    @Query("UPDATE transactions SET deducedVault = :vaultKey, subTag = :subTag WHERE UPPER(merchant) = UPPER(:merchantName) AND isInternalTransfer = 0")
+    suspend fun updateAllMatchingMerchantTransactions(merchantName: String, vaultKey: String, subTag: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun updateVaultBalances(balances: List<VaultBalanceEntity>)
@@ -71,11 +101,40 @@ interface FinanceDao {
 
     @Query("SELECT * FROM account_snapshot WHERE id = 1")
     suspend fun getSnapshotSync(): AccountSnapshotEntity?
+
+    // Self-Learning Merchant Rules
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertMerchantRule(rule: MerchantRuleEntity)
+
+    @Query("SELECT * FROM merchant_rules ORDER BY updatedAt DESC")
+    fun getAllMerchantRules(): Flow<List<MerchantRuleEntity>>
+
+    @Query("SELECT * FROM merchant_rules")
+    suspend fun getAllMerchantRulesSync(): List<MerchantRuleEntity>
+
+    @Query("DELETE FROM merchant_rules WHERE merchantKey = :key")
+    suspend fun deleteMerchantRule(key: String)
+
+    // Cycle-Close History Snapshots
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCycleSnapshot(snapshot: CycleSnapshotEntity)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertCycleSnapshotsIgnoreExisting(snapshots: List<CycleSnapshotEntity>)
+
+    @Query("SELECT * FROM cycle_snapshots ORDER BY cycleKey DESC")
+    fun getAllCycleSnapshots(): Flow<List<CycleSnapshotEntity>>
 }
 
 @Database(
-    entities = [TransactionEntity::class, VaultBalanceEntity::class, AccountSnapshotEntity::class],
-    version = 3,
+    entities = [
+        TransactionEntity::class,
+        VaultBalanceEntity::class,
+        AccountSnapshotEntity::class,
+        MerchantRuleEntity::class,
+        CycleSnapshotEntity::class
+    ],
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

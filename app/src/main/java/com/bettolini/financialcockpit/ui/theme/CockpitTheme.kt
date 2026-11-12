@@ -137,6 +137,26 @@ fun getVaultSolidColor(key: String, isDark: Boolean): Color = when (key) {
     else -> IndigoTop
 }
 
+fun getSubTagPalettePair(subTag: String): Pair<Color, Color> = when (subTag) {
+    "#Online & Retail" -> VioletTop to VioletBot
+    "#Bills & Subs", "#Utilities", "#Auto Loan" -> AmberTop to AmberBot
+    "#Dining", "#Nightlife" -> PlumTop to PlumBot
+    "#Groceries" -> GoldTop to GoldBot
+    "#Fuel", "#Fleet & Parts" -> AmethystTop to AmethystBot
+    "#Travel" -> OrchidTop to OrchidBot
+    else -> IndigoTop to IndigoBot
+}
+
+fun getSubTagSolidColor(subTag: String, isDark: Boolean): Color = when (subTag) {
+    "#Online & Retail" -> if (isDark) Color(0xFFA96EE2) else VioletTop
+    "#Bills & Subs", "#Utilities", "#Auto Loan" -> if (isDark) Color(0xFFFFB429) else Color(0xFFE58200)
+    "#Dining", "#Nightlife" -> if (isDark) Color(0xFFD177B5) else PlumTop
+    "#Groceries" -> if (isDark) GoldTop else Color(0xFFD98B00)
+    "#Fuel", "#Fleet & Parts" -> if (isDark) Color(0xFF9C78CC) else AmethystTop
+    "#Travel" -> if (isDark) Color(0xFFCC5CE6) else OrchidTop
+    else -> if (isDark) Color(0xFF8C7AB8) else IndigoTop
+}
+
 @Composable
 fun ProvideCockpitColors(colors: CockpitColors, content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalCockpitColors provides colors, content = content)
