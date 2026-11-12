@@ -2,11 +2,11 @@ package com.bettolini.financialcockpit.widget
 
 import android.content.Context
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
+import androidx.glance.GlanceTheme
 import androidx.glance.LocalSize
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionStartActivity
@@ -59,7 +59,9 @@ class CockpitWidget : GlanceAppWidget() {
         val vaults = dao.getAllVaultsSync()
 
         provideContent {
-            CockpitWidgetContent(snapshot = snapshot, vaults = vaults)
+            GlanceTheme {
+                CockpitWidgetContent(snapshot = snapshot, vaults = vaults)
+            }
         }
     }
 }
@@ -84,21 +86,22 @@ private fun vaultShortName(key: String): String = when (key) {
     else -> key
 }
 
-private fun vaultBarColor(key: String): Color = when (key) {
-    "RENT" -> Color(0xFF388AF6)
-    "FIXED_OVERHEAD" -> Color(0xFFFF9500)
-    "SUSTENANCE_FLEET" -> Color(0xFF30D158)
-    "DISCRETIONARY" -> Color(0xFFAF52DE)
-    "TRAVEL" -> Color(0xFF5AC8FA)
-    "WEALTH_SURPLUS" -> Color(0xFFFFD60A)
-    else -> Color(0xFF00E676)
+@Composable
+private fun vaultBarColor(key: String): ColorProvider = when (key) {
+    "SUSTENANCE_FLEET" -> GlanceTheme.colors.primary
+    "FIXED_OVERHEAD" -> GlanceTheme.colors.tertiary
+    "DISCRETIONARY" -> GlanceTheme.colors.secondary
+    "TRAVEL" -> GlanceTheme.colors.secondary
+    "WEALTH_SURPLUS" -> GlanceTheme.colors.primary
+    "RENT" -> GlanceTheme.colors.tertiary
+    else -> GlanceTheme.colors.primary
 }
 
 @Composable
 private fun SyncPill(compact: Boolean = false) {
     Box(
         modifier = GlanceModifier
-            .background(ColorProvider(Color(0xFF1E1E22)))
+            .background(GlanceTheme.colors.secondaryContainer)
             .cornerRadius(8.dp)
             .padding(
                 horizontal = if (compact) 7.dp else 8.dp,
@@ -110,7 +113,7 @@ private fun SyncPill(compact: Boolean = false) {
         Text(
             text = if (compact) "↻" else "↻ Sync",
             style = TextStyle(
-                color = ColorProvider(Color(0xFF00E676)),
+                color = GlanceTheme.colors.onSecondaryContainer,
                 fontSize = if (compact) 13.sp else 10.sp,
                 fontWeight = FontWeight.Bold
             ),
@@ -145,14 +148,6 @@ private fun CockpitWidgetContent(
     val dailySafe = (usableCash / daysLeft.toDouble()).coerceAtLeast(0.0)
     val activeMode = DynamicAllocationEngine.getLiveModeBadge(usableCash)
 
-    val modeColor = when (activeMode.first) {
-        "APEX WEALTH MODE" -> Color(0xFFFFD60A)
-        "BRIDGE VELOCITY" -> Color(0xFF388AF6)
-        "CRUISING ALTITUDE" -> Color(0xFF5AC8FA)
-        "STEADY RUNWAY" -> Color(0xFF00E676)
-        else -> Color(0xFFFF9F0A)
-    }
-
     val priorityOrder = listOf("SUSTENANCE_FLEET", "FIXED_OVERHEAD", "DISCRETIONARY", "TRAVEL", "WEALTH_SURPLUS", "RENT")
     val activeVaults = priorityOrder
         .mapNotNull { key -> vaults.find { it.vaultKey == key } }
@@ -164,7 +159,7 @@ private fun CockpitWidgetContent(
             Row(
                 modifier = GlanceModifier
                     .fillMaxSize()
-                    .background(ColorProvider(Color(0xFF121214)))
+                    .background(GlanceTheme.colors.surface)
                     .cornerRadius(16.dp)
                     .padding(horizontal = 12.dp, vertical = 8.dp)
                     .clickable(actionStartActivity<MainActivity>()),
@@ -173,12 +168,12 @@ private fun CockpitWidgetContent(
                 Column(modifier = GlanceModifier.defaultWeight()) {
                     Text(
                         text = "AED ${String.format("%,.0f", usableCash)}",
-                        style = TextStyle(color = ColorProvider(Color(0xFF00E676)), fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                        style = TextStyle(color = GlanceTheme.colors.primary, fontSize = 18.sp, fontWeight = FontWeight.Bold),
                         maxLines = 1
                     )
                     Text(
                         text = "AED ${String.format("%.0f", dailySafe)}/d",
-                        style = TextStyle(color = ColorProvider(Color.White), fontSize = 12.sp, fontWeight = FontWeight.Medium),
+                        style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = 12.sp, fontWeight = FontWeight.Medium),
                         maxLines = 1
                     )
                 }
@@ -191,7 +186,7 @@ private fun CockpitWidgetContent(
             Column(
                 modifier = GlanceModifier
                     .fillMaxSize()
-                    .background(ColorProvider(Color(0xFF121214)))
+                    .background(GlanceTheme.colors.surface)
                     .cornerRadius(18.dp)
                     .padding(12.dp)
                     .clickable(actionStartActivity<MainActivity>())
@@ -202,7 +197,7 @@ private fun CockpitWidgetContent(
                 ) {
                     Text(
                         text = "●",
-                        style = TextStyle(color = ColorProvider(modeColor), fontSize = 12.sp, fontWeight = FontWeight.Bold),
+                        style = TextStyle(color = GlanceTheme.colors.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold),
                         modifier = GlanceModifier.defaultWeight()
                     )
                     SyncPill(compact = true)
@@ -212,12 +207,12 @@ private fun CockpitWidgetContent(
 
                 Text(
                     text = "USABLE CASH",
-                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                    style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 9.sp, fontWeight = FontWeight.Bold),
                     maxLines = 1
                 )
                 Text(
                     text = "AED ${String.format("%,.0f", usableCash)}",
-                    style = TextStyle(color = ColorProvider(Color(0xFF00E676)), fontSize = 20.sp, fontWeight = FontWeight.Bold),
+                    style = TextStyle(color = GlanceTheme.colors.primary, fontSize = 20.sp, fontWeight = FontWeight.Bold),
                     maxLines = 1
                 )
 
@@ -225,12 +220,12 @@ private fun CockpitWidgetContent(
 
                 Text(
                     text = "DAILY PACE (${daysLeft}D)",
-                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                    style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 9.sp, fontWeight = FontWeight.Bold),
                     maxLines = 1
                 )
                 Text(
                     text = "AED ${String.format("%.0f", dailySafe)}/d",
-                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 15.sp, fontWeight = FontWeight.Bold),
+                    style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = 15.sp, fontWeight = FontWeight.Bold),
                     maxLines = 1
                 )
 
@@ -242,13 +237,13 @@ private fun CockpitWidgetContent(
                             Row(modifier = GlanceModifier.fillMaxWidth()) {
                                 Text(
                                     text = vaultShortName(vault.vaultKey),
-                                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 9.sp, fontWeight = FontWeight.Medium),
+                                    style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 9.sp, fontWeight = FontWeight.Medium),
                                     maxLines = 1,
                                     modifier = GlanceModifier.defaultWeight()
                                 )
                                 Text(
                                     text = "${String.format("%,.0f", vault.currentRemaining)}",
-                                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                    style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = 9.sp, fontWeight = FontWeight.Bold),
                                     maxLines = 1
                                 )
                             }
@@ -256,8 +251,8 @@ private fun CockpitWidgetContent(
                             LinearProgressIndicator(
                                 progress = frac,
                                 modifier = GlanceModifier.fillMaxWidth().height(4.dp),
-                                color = ColorProvider(vaultBarColor(vault.vaultKey)),
-                                backgroundColor = ColorProvider(Color(0xFF242426))
+                                color = vaultBarColor(vault.vaultKey),
+                                backgroundColor = GlanceTheme.colors.surfaceVariant
                             )
                         }
                     }
@@ -270,7 +265,7 @@ private fun CockpitWidgetContent(
             Row(
                 modifier = GlanceModifier
                     .fillMaxSize()
-                    .background(ColorProvider(Color(0xFF121214)))
+                    .background(GlanceTheme.colors.surface)
                     .cornerRadius(16.dp)
                     .padding(horizontal = 14.dp, vertical = 8.dp)
                     .clickable(actionStartActivity<MainActivity>()),
@@ -279,12 +274,12 @@ private fun CockpitWidgetContent(
                 Column(modifier = GlanceModifier.defaultWeight()) {
                     Text(
                         text = "USABLE CASH",
-                        style = TextStyle(color = ColorProvider(Color.White), fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                        style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 9.sp, fontWeight = FontWeight.Bold),
                         maxLines = 1
                     )
                     Text(
                         text = "AED ${String.format("%,.0f", usableCash)}",
-                        style = TextStyle(color = ColorProvider(Color(0xFF00E676)), fontSize = 20.sp, fontWeight = FontWeight.Bold),
+                        style = TextStyle(color = GlanceTheme.colors.primary, fontSize = 20.sp, fontWeight = FontWeight.Bold),
                         maxLines = 1
                     )
                 }
@@ -295,12 +290,12 @@ private fun CockpitWidgetContent(
                 ) {
                     Text(
                         text = "DAILY PACE (${daysLeft}D)",
-                        style = TextStyle(color = ColorProvider(Color.White), fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                        style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 9.sp, fontWeight = FontWeight.Bold),
                         maxLines = 1
                     )
                     Text(
                         text = "AED ${String.format("%.0f", dailySafe)}/d",
-                        style = TextStyle(color = ColorProvider(Color.White), fontSize = 15.sp, fontWeight = FontWeight.Bold),
+                        style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = 15.sp, fontWeight = FontWeight.Bold),
                         maxLines = 1
                     )
                 }
@@ -314,7 +309,7 @@ private fun CockpitWidgetContent(
             Column(
                 modifier = GlanceModifier
                     .fillMaxSize()
-                    .background(ColorProvider(Color(0xFF121214)))
+                    .background(GlanceTheme.colors.surface)
                     .cornerRadius(18.dp)
                     .padding(if (isMedium) 12.dp else 14.dp)
                     .clickable(actionStartActivity<MainActivity>())
@@ -327,7 +322,7 @@ private fun CockpitWidgetContent(
                     Text(
                         text = "● ${activeMode.first}",
                         style = TextStyle(
-                            color = ColorProvider(modeColor),
+                            color = GlanceTheme.colors.primary,
                             fontSize = if (isMedium) 9.sp else 10.sp,
                             fontWeight = FontWeight.Bold
                         ),
@@ -339,7 +334,7 @@ private fun CockpitWidgetContent(
 
                 Spacer(modifier = GlanceModifier.height(6.dp))
 
-                // Hero Row: Scales typography cleanly at 3 columns so AED never truncates
+                // Hero Row
                 Row(
                     modifier = GlanceModifier.fillMaxWidth(),
                     verticalAlignment = Alignment.Vertical.Bottom
@@ -347,13 +342,13 @@ private fun CockpitWidgetContent(
                     Column(modifier = GlanceModifier.defaultWeight()) {
                         Text(
                             text = "USABLE CASH",
-                            style = TextStyle(color = ColorProvider(Color.White), fontSize = if (isMedium) 9.sp else 10.sp, fontWeight = FontWeight.Bold),
+                            style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = if (isMedium) 9.sp else 10.sp, fontWeight = FontWeight.Bold),
                             maxLines = 1
                         )
                         Text(
                             text = "AED ${String.format("%,.0f", usableCash)}",
                             style = TextStyle(
-                                color = ColorProvider(Color(0xFF00E676)),
+                                color = GlanceTheme.colors.primary,
                                 fontSize = if (isMedium) 20.sp else 25.sp,
                                 fontWeight = FontWeight.Bold
                             ),
@@ -364,13 +359,13 @@ private fun CockpitWidgetContent(
                     Column(horizontalAlignment = Alignment.Horizontal.End) {
                         Text(
                             text = "DAILY (${daysLeft}D)",
-                            style = TextStyle(color = ColorProvider(Color.White), fontSize = if (isMedium) 9.sp else 10.sp, fontWeight = FontWeight.Bold),
+                            style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = if (isMedium) 9.sp else 10.sp, fontWeight = FontWeight.Bold),
                             maxLines = 1
                         )
                         Text(
                             text = if (isMedium) "AED ${String.format("%.0f", dailySafe)}/d" else "AED ${String.format("%.0f", dailySafe)}/day",
                             style = TextStyle(
-                                color = ColorProvider(Color.White),
+                                color = GlanceTheme.colors.onSurface,
                                 fontSize = if (isMedium) 14.sp else 16.sp,
                                 fontWeight = FontWeight.Bold
                             ),
@@ -388,13 +383,13 @@ private fun CockpitWidgetContent(
                         Row(modifier = GlanceModifier.fillMaxWidth()) {
                             Text(
                                 text = "Cash Runway",
-                                style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Medium),
+                                style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Medium),
                                 maxLines = 1,
                                 modifier = GlanceModifier.defaultWeight()
                             )
                             Text(
                                 text = "${(cashPct * 100).toInt()}%",
-                                style = TextStyle(color = ColorProvider(Color(0xFF00E676)), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                style = TextStyle(color = GlanceTheme.colors.primary, fontSize = 10.sp, fontWeight = FontWeight.Bold),
                                 maxLines = 1
                             )
                         }
@@ -402,8 +397,8 @@ private fun CockpitWidgetContent(
                         LinearProgressIndicator(
                             progress = cashPct,
                             modifier = GlanceModifier.fillMaxWidth().height(5.dp),
-                            color = ColorProvider(Color(0xFF00E676)),
-                            backgroundColor = ColorProvider(Color(0xFF242426))
+                            color = GlanceTheme.colors.primary,
+                            backgroundColor = GlanceTheme.colors.surfaceVariant
                         )
                     }
 
@@ -413,13 +408,13 @@ private fun CockpitWidgetContent(
                             Row(modifier = GlanceModifier.fillMaxWidth()) {
                                 Text(
                                     text = if (isMedium) vaultShortName(vault.vaultKey) else vaultDisplayName(vault.vaultKey),
-                                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Medium),
+                                    style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Medium),
                                     maxLines = 1,
                                     modifier = GlanceModifier.defaultWeight()
                                 )
                                 Text(
                                     text = "AED ${String.format("%,.0f", vault.currentRemaining)}",
-                                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                    style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = 10.sp, fontWeight = FontWeight.Bold),
                                     maxLines = 1
                                 )
                             }
@@ -427,8 +422,8 @@ private fun CockpitWidgetContent(
                             LinearProgressIndicator(
                                 progress = frac,
                                 modifier = GlanceModifier.fillMaxWidth().height(5.dp),
-                                color = ColorProvider(vaultBarColor(vault.vaultKey)),
-                                backgroundColor = ColorProvider(Color(0xFF242426))
+                                color = vaultBarColor(vault.vaultKey),
+                                backgroundColor = GlanceTheme.colors.surfaceVariant
                             )
                         }
                     }
@@ -438,13 +433,13 @@ private fun CockpitWidgetContent(
                         Row(modifier = GlanceModifier.fillMaxWidth()) {
                             Text(
                                 text = "Card 3445 Limit",
-                                style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Medium),
+                                style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Medium),
                                 maxLines = 1,
                                 modifier = GlanceModifier.defaultWeight()
                             )
                             Text(
                                 text = "AED ${String.format("%,.0f", totalCcOwed)} / 42k",
-                                style = TextStyle(color = ColorProvider(Color(0xFFFF453A)), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                style = TextStyle(color = GlanceTheme.colors.tertiary, fontSize = 10.sp, fontWeight = FontWeight.Bold),
                                 maxLines = 1
                             )
                         }
@@ -452,25 +447,24 @@ private fun CockpitWidgetContent(
                         LinearProgressIndicator(
                             progress = ccUtil,
                             modifier = GlanceModifier.fillMaxWidth().height(4.dp),
-                            color = ColorProvider(Color(0xFFFF453A)),
-                            backgroundColor = ColorProvider(Color(0xFF242426))
+                            color = GlanceTheme.colors.tertiary,
+                            backgroundColor = GlanceTheme.colors.surfaceVariant
                         )
                     }
                 } else if (isMedium) {
-                    // 3-Column 2-Row Height: Stack top 2 Vault Bars vertically so "Sustenance" never truncates
                     activeVaults.take(2).forEachIndexed { idx, vault ->
                         val frac = if (vault.allocatedAmount > 0.0) (vault.currentRemaining / vault.allocatedAmount).toFloat().coerceIn(0f, 1f) else 0f
                         Column(modifier = GlanceModifier.fillMaxWidth().padding(bottom = if (idx == 0) 6.dp else 0.dp)) {
                             Row(modifier = GlanceModifier.fillMaxWidth()) {
                                 Text(
                                     text = vaultShortName(vault.vaultKey),
-                                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Medium),
+                                    style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Medium),
                                     maxLines = 1,
                                     modifier = GlanceModifier.defaultWeight()
                                 )
                                 Text(
                                     text = "AED ${String.format("%,.0f", vault.currentRemaining)}",
-                                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                    style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = 10.sp, fontWeight = FontWeight.Bold),
                                     maxLines = 1
                                 )
                             }
@@ -478,13 +472,12 @@ private fun CockpitWidgetContent(
                             LinearProgressIndicator(
                                 progress = frac,
                                 modifier = GlanceModifier.fillMaxWidth().height(4.dp),
-                                color = ColorProvider(vaultBarColor(vault.vaultKey)),
-                                backgroundColor = ColorProvider(Color(0xFF242426))
+                                color = vaultBarColor(vault.vaultKey),
+                                backgroundColor = GlanceTheme.colors.surfaceVariant
                             )
                         }
                     }
                 } else {
-                    // Wide 4/5-Column 2-Row Height: Side-by-side Top 2 Vault Bars
                     val topTwo = activeVaults.take(2)
                     if (topTwo.isNotEmpty()) {
                         Row(
@@ -501,13 +494,13 @@ private fun CockpitWidgetContent(
                                     Row(modifier = GlanceModifier.fillMaxWidth()) {
                                         Text(
                                             text = vaultShortName(vault.vaultKey),
-                                            style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Medium),
+                                            style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Medium),
                                             maxLines = 1,
                                             modifier = GlanceModifier.defaultWeight()
                                         )
                                         Text(
                                             text = "AED ${String.format("%,.0f", vault.currentRemaining)}",
-                                            style = TextStyle(color = ColorProvider(Color.White), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                            style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = 10.sp, fontWeight = FontWeight.Bold),
                                             maxLines = 1
                                         )
                                     }
@@ -515,8 +508,8 @@ private fun CockpitWidgetContent(
                                     LinearProgressIndicator(
                                         progress = frac,
                                         modifier = GlanceModifier.fillMaxWidth().height(5.dp),
-                                        color = ColorProvider(vaultBarColor(vault.vaultKey)),
-                                        backgroundColor = ColorProvider(Color(0xFF242426))
+                                        color = vaultBarColor(vault.vaultKey),
+                                        backgroundColor = GlanceTheme.colors.surfaceVariant
                                     )
                                 }
                             }
@@ -537,17 +530,17 @@ private fun CockpitWidgetContent(
                         isMedium -> "Due: ${String.format("%,.0f", billedDue)}"
                         else -> "CC Due: AED ${String.format("%,.0f", billedDue)}"
                     }
-                    val billColor = if (billedDue <= 0.01) Color(0xFF00E676) else Color(0xFFFF9F0A)
+                    val billColor = if (billedDue <= 0.01) GlanceTheme.colors.primary else GlanceTheme.colors.tertiary
 
                     Text(
                         text = billText,
-                        style = TextStyle(color = ColorProvider(billColor), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                        style = TextStyle(color = billColor, fontSize = 10.sp, fontWeight = FontWeight.Bold),
                         maxLines = 1,
                         modifier = GlanceModifier.defaultWeight()
                     )
                     Text(
                         text = if (isMedium) "Unbilled: ${String.format("%,.0f", unbilled)}" else "Unbilled: AED ${String.format("%,.0f", unbilled)}",
-                        style = TextStyle(color = ColorProvider(Color(0xFFFF453A)), fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                        style = TextStyle(color = GlanceTheme.colors.tertiary, fontSize = 10.sp, fontWeight = FontWeight.Bold),
                         maxLines = 1
                     )
                 }
