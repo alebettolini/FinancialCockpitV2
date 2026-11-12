@@ -21,19 +21,38 @@ object SmsHistoryScanner {
         ) ?: return@withContext 0
 
         var detectedDebitBalance = 6300.00
-        var detectedCreditAvlLimit = 33449.55
+        var detectedCreditAvlLimit = 33485.39
+        var lastCreditLimitTimestamp = 0L
         var detectedStatementDue = 3620.45
         var detectedDueDate = "19 Nov"
 
         val creditLimit = 42000.00
         val parsedTransactions = mutableListOf<TransactionEntity>()
 
-        val debitBalanceRegex = Regex("""(?:Avl Balance is|Available Balance:?)\s*(?:AED)?\s*([\d,]+\.?\d*)""", RegexOption.IGNORE_CASE)
-        val creditLimitRegex = Regex("""(?:Avl Limit is|Available Limit:?)\s*(?:AED)?\s*([\d,]+\.?\d*)""", RegexOption.IGNORE_CASE)
-        val purchaseRegex = Regex("""(?:Purchase of|Debited with|Spent)\s+(?:AED)?\s*([\d,]+\.?\d*)""", RegexOption.IGNORE_CASE)
-        val merchantRegex = Regex("""at\s+([^.]+?)\s+on""", RegexOption.IGNORE_CASE)
-        val statementRegex = Regex("""(?:statement|total amt due|amount due).*?AED\s*([\d,]+\.?\d*).*?(?:due date:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}\s+\w+))?""", RegexOption.IGNORE_CASE)
-        val ccPaymentRegex = Regex("""Payment of\s+AED\s*([\d,]+\.?\d*)\s+received""", RegexOption.IGNORE_CASE)
+        val debitBalanceRegex = Regex(
+            """(?:Avl\.?\s*Balance|Available\s*Balance)\s*(?:is|:)?\s*(?:AED)?\s*([\d,]+\.?\d*)""",
+            RegexOption.IGNORE_CASE
+        )
+        val creditLimitRegex = Regex(
+            """(?:Avl\.?\s*(?:Cr\.?\s*)?Limit|Available\s*(?:Cr\.?\s*)?Limit)\s*(?:is|:)?\s*(?:AED)?\s*([\d,]+\.?\d*)""",
+            RegexOption.IGNORE_CASE
+        )
+        val purchaseRegex = Regex(
+            """(?:Purchase of|Debited with|Spent|Payment of)\s+(?:AED)?\s*([\d,]+\.?\d*)""",
+            RegexOption.IGNORE_CASE
+        )
+        val merchantRegex = Regex(
+            """(?:at|to)\s+([^.,\n]+?)(?:\s+on|\s+using|,|\.|$)""",
+            RegexOption.IGNORE_CASE
+        )
+        val statementRegex = Regex(
+            """(?:statement|total amt due|amount due).*?AED\s*([\d,]+\.?\d*).*?(?:due date:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}\s+\w+))?""",
+            RegexOption.IGNORE_CASE
+        )
+        val ccPaymentRegex = Regex(
+            """Payment of\s+AED\s*([\d,]+\.?\d*)\s+received""",
+            RegexOption.IGNORE_CASE
+        )
 
         cursor.use { c ->
             val addressIndex = c.getColumnIndex(Telephony.Sms.ADDRESS)
@@ -48,7 +67,7 @@ object SmsHistoryScanner {
                 if (address.contains("ENBD", true) || address.contains("EmiratesNBD", true)) {
                     val isCredit = body.contains("Credit Card", true) ||
                             body.contains("3445", true) ||
-                            body.contains("Avl Limit", true)
+                            body.contains("Limit", true)
 
                     // 1. Live Checking Account Balance
                     val debitBalMatch = debitBalanceRegex.find(body)
@@ -60,10 +79,10 @@ object SmsHistoryScanner {
 
                     // 2. Credit Card Available Limit
                     val creditLimMatch = creditLimitRegex.find(body)
-                    if (creditLimMatch != null) {
-                        creditLimMatch.groupValues[1].replace(",", "").toDoubleOrNull()?.let {
-                            detectedCreditAvlLimit = it
-                        }
+                    val parsedLimitInMsg = creditLimMatch?.groupValues?.get(1)?.replace(",", "")?.toDoubleOrNull()
+                    if (parsedLimitInMsg != null) {
+                        detectedCreditAvlLimit = parsedLimitInMsg
+                        lastCreditLimitTimestamp = date
                     }
 
                     // 3. Monthly Statement Generated
@@ -78,7 +97,7 @@ object SmsHistoryScanner {
                         }
                     }
 
-                    // 4. Credit Card Repayment Received (reduces billed due)
+                    // 4. Credit Card Repayment Received
                     val paymentMatch = ccPaymentRegex.find(body)
                     if (paymentMatch != null && isCredit) {
                         val paid = paymentMatch.groupValues[1].replace(",", "").toDoubleOrNull() ?: 0.0
@@ -86,10 +105,17 @@ object SmsHistoryScanner {
                     }
 
                     // 5. Card / Account Spend Transaction
+                    val isPaymentReceipt = body.contains("received towards", true) || body.contains("credited", true)
                     val purchaseMatch = purchaseRegex.find(body)
-                    if (purchaseMatch != null) {
+                    if (purchaseMatch != null && !isPaymentReceipt) {
                         val amount = purchaseMatch.groupValues[1].replace(",", "").toDoubleOrNull() ?: 0.0
-                        val merchant = merchantRegex.find(body)?.groupValues?.get(1)?.trim() ?: "Direct Debit"
+                        val rawMerchant = merchantRegex.find(body)?.groupValues?.get(1)?.trim()
+                        val merchant = if (!rawMerchant.isNullOrBlank()) rawMerchant else if (isCredit) "Card Purchase" else "Account Debit"
+
+                        // Fallback deduction if a CC swipe SMS arrived after the last explicit Avl Limit SMS without stating a new limit
+                        if (isCredit && parsedLimitInMsg == null && date > lastCreditLimitTimestamp) {
+                            detectedCreditAvlLimit = (detectedCreditAvlLimit - amount).coerceAtLeast(0.0)
+                        }
 
                         val targetVault = when {
                             merchant.contains("ENOC", true) || merchant.contains("EPPCO", true) ||
@@ -123,11 +149,9 @@ object SmsHistoryScanner {
             }
         }
 
-        // Exact CC Debt Accounting: Total Owed = 42,000 - Avl Limit; Unbilled = Total Owed - Billed Statement Due
         val creditTotalOwed = (creditLimit - detectedCreditAvlLimit).coerceAtLeast(0.0)
         val unbilledSpend = (creditTotalOwed - detectedStatementDue).coerceAtLeast(0.0)
 
-        // True Liquid Cash = Checking Cash - Billed Statement Due
         val trueUsableCash = (detectedDebitBalance - detectedStatementDue).coerceAtLeast(0.0)
         val allocation = DynamicAllocationEngine.calculateDynamicSplit(trueUsableCash)
 
