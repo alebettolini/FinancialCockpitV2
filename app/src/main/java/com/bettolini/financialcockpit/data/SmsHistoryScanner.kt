@@ -46,6 +46,7 @@ object SmsHistoryScanner {
 
         val creditLimit = 42000.00
         val parsedTransactions = mutableListOf<TransactionEntity>()
+        val recordedCcPayments = mutableListOf<Pair<Long, Double>>()
 
         val debitBalanceRegex = Regex(
             """(?:Avl\.?\s*Balance|Available\s*Balance)\s*(?:is|:)?\s*(?:AED)?\s*([\d,]+\.?\d*)""",
@@ -73,6 +74,10 @@ object SmsHistoryScanner {
         )
         val ccPaymentRegex = Regex(
             """Payment of\s+AED\s*([\d,]+\.?\d*)\s+(?:has been\s+)?received""",
+            RegexOption.IGNORE_CASE
+        )
+        val ccTransferRegex = Regex(
+            """AED\s*([\d,]+\.?\d*)\s+has been deducted from your account\s+([A-Z0-9]+)\s+towards payment of your Credit Card ending\s+(\d{4})""",
             RegexOption.IGNORE_CASE
         )
 
@@ -124,14 +129,47 @@ object SmsHistoryScanner {
                         }
                     }
 
+                    val ccTransferMatch = ccTransferRegex.find(body)
+                    if (ccTransferMatch != null) {
+                        val paid = ccTransferMatch.groupValues[1].replace(",", "").toDoubleOrNull() ?: 0.0
+                        val cardLast4 = ccTransferMatch.groupValues[3]
+                        val alreadyCounted = recordedCcPayments.any {
+                            kotlin.math.abs(it.second - paid) < 0.01 && kotlin.math.abs(date - it.first) < 86_400_000L
+                        }
+                        if (!alreadyCounted && paid > 0.0) {
+                            recordedCcPayments.add(date to paid)
+                            detectedStatementDue = (detectedStatementDue - paid).coerceAtLeast(0.0)
+                        }
+                        parsedTransactions.add(
+                            TransactionEntity(
+                                timestamp = date,
+                                amount = paid,
+                                merchant = "ENBD Card *$cardLast4 Repayment",
+                                isCreditCard = false,
+                                isInternalTransfer = true,
+                                isCurrentCycle = date >= cycleStartMillis,
+                                deducedVault = "INTERNAL_TRANSFER",
+                                subTag = "#CC Bill Paid",
+                                rawSms = body
+                            )
+                        )
+                        continue
+                    }
+
                     val paymentMatch = ccPaymentRegex.find(body)
                     if (paymentMatch != null && isCredit) {
                         val paid = paymentMatch.groupValues[1].replace(",", "").toDoubleOrNull() ?: 0.0
-                        detectedStatementDue = (detectedStatementDue - paid).coerceAtLeast(0.0)
+                        val alreadyCounted = recordedCcPayments.any {
+                            kotlin.math.abs(it.second - paid) < 0.01 && kotlin.math.abs(date - it.first) < 86_400_000L
+                        }
+                        if (!alreadyCounted && paid > 0.0) {
+                            recordedCcPayments.add(date to paid)
+                            detectedStatementDue = (detectedStatementDue - paid).coerceAtLeast(0.0)
+                        }
                     }
 
                     val isPaymentReceipt = body.contains("received towards", true) || body.contains("credited", true)
-                    val isCcBillTransfer = body.contains("Credit Card payment", true) || body.contains("Card Payment", true)
+                    val isCcBillTransfer = body.contains("Credit Card payment", true) || body.contains("Card Payment", true) || body.contains("towards payment of your Credit Card", true)
                     val purchaseMatch = purchaseRegex.find(body) ?: prefixDebitRegex.find(body)
 
                     if (purchaseMatch != null && !isPaymentReceipt) {
