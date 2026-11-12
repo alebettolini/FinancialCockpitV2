@@ -25,6 +25,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -44,8 +45,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -113,7 +112,7 @@ private fun Modifier.tactileCardPress(onClick: () -> Unit): Modifier = composed 
 }
 
 class MainActivity : ComponentActivity() {
-    @OptIn(ExperimentalMaterial3Api::class)
+    @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val dao = AppDatabase.getInstance(this).financeDao()
@@ -359,7 +358,7 @@ class MainActivity : ComponentActivity() {
                                             onSelectTransaction = { selectedTxnForEdit = it }
                                         )
                                     } else {
-                                        navigateBack()
+                                        LaunchedEffect(Unit) { navigateBack() }
                                     }
                                 }
 
@@ -432,9 +431,7 @@ class MainActivity : ComponentActivity() {
                                                         border = BorderStroke(1.dp, palette.cardBorderBrush)
                                                     ) {
                                                         Box(contentAlignment = Alignment.Center) {
-                                                            Icon(
-                                                                imageVector = Icons.Outlined.Settings,
-                                                                contentDescription = "Settings",
+                                                            SettingsGearIcon(
                                                                 tint = palette.textPrimary,
                                                                 modifier = Modifier.size(18.dp)
                                                             )
@@ -1764,7 +1761,7 @@ fun VaultDetailScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun SettingsBottomSheet(
     themeMode: String,
@@ -1995,7 +1992,7 @@ fun SettingsBottomSheet(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ReclassifyTransactionSheet(
     txn: TransactionEntity,
@@ -2210,7 +2207,7 @@ fun ReclassifyTransactionSheet(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun CycleHistorySheet(
     snapshots: List<CycleSnapshotEntity>,
@@ -2624,6 +2621,44 @@ fun TransactionRowCard(
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (txn.isInternalTransfer) palette.positiveGreen else palette.textPrimary
+            )
+        }
+    }
+}
+
+
+@Composable
+fun SettingsGearIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.7.dp.toPx()
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val outerR = size.minDimension * 0.34f
+        val innerR = size.minDimension * 0.14f
+        val toothStart = size.minDimension * 0.36f
+        val toothEnd = size.minDimension * 0.47f
+
+        drawCircle(
+            color = tint,
+            radius = outerR,
+            center = center,
+            style = Stroke(width = stroke)
+        )
+        drawCircle(
+            color = tint,
+            radius = innerR,
+            center = center,
+            style = Stroke(width = stroke)
+        )
+        for (i in 0 until 8) {
+            val angle = Math.toRadians(i * 45.0)
+            val cosA = kotlin.math.cos(angle).toFloat()
+            val sinA = kotlin.math.sin(angle).toFloat()
+            drawLine(
+                color = tint,
+                start = Offset(center.x + toothStart * cosA, center.y + toothStart * sinA),
+                end = Offset(center.x + toothEnd * cosA, center.y + toothEnd * sinA),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
             )
         }
     }
