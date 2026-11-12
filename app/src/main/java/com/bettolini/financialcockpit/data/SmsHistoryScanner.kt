@@ -56,7 +56,11 @@ object SmsHistoryScanner {
             RegexOption.IGNORE_CASE
         )
         val purchaseRegex = Regex(
-            """(?:Purchase of|Debited with|Spent|Payment of)\s+(?:AED)?\s*([\d,]+\.?\d*)""",
+            """(?:Purchase of|Debited with|Spent|Payment of|Installment of)\s+(?:AED)?\s*([\d,]+\.?\d*)""",
+            RegexOption.IGNORE_CASE
+        )
+        val prefixDebitRegex = Regex(
+            """AED\s*([\d,]+\.?\d*)\s+(?:has been\s+)?debited""",
             RegexOption.IGNORE_CASE
         )
         val merchantRegex = Regex(
@@ -128,7 +132,7 @@ object SmsHistoryScanner {
 
                     val isPaymentReceipt = body.contains("received towards", true) || body.contains("credited", true)
                     val isCcBillTransfer = body.contains("Credit Card payment", true) || body.contains("Card Payment", true)
-                    val purchaseMatch = purchaseRegex.find(body)
+                    val purchaseMatch = purchaseRegex.find(body) ?: prefixDebitRegex.find(body)
 
                     if (purchaseMatch != null && !isPaymentReceipt) {
                         val amount = purchaseMatch.groupValues[1].replace(",", "").toDoubleOrNull() ?: 0.0
