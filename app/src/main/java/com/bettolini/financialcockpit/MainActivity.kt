@@ -11,8 +11,14 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -24,7 +30,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,6 +47,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -51,6 +61,13 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+
+private enum class ActiveScreen {
+    DASHBOARD,
+    DEBIT_ANALYTICS,
+    CREDIT_ANALYTICS,
+    VAULT_DETAIL
+}
 
 class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -103,7 +120,6 @@ class MainActivity : ComponentActivity() {
             val cycleSnapshots by dao.getAllCycleSnapshots().collectAsState(initial = emptyList())
             val merchantRules by dao.getAllMerchantRules().collectAsState(initial = emptyList())
 
-            // Auto-populate after DB migration if SMS permission is already granted
             LaunchedEffect(hasSmsPermission, snapshot) {
                 if (hasSmsPermission && snapshot == null) {
                     SmsHistoryScanner.scanAndSyncInbox(context)
@@ -111,14 +127,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Navigation & Sheet State
-            var showCreditCardScreen by remember { mutableStateOf(false) }
+            // Navigation & Modal State
+            var currentScreen by remember { mutableStateOf(ActiveScreen.DASHBOARD) }
+            var selectedVaultKey by remember { mutableStateOf<String?>(null) }
+            var showSettingsSheet by remember { mutableStateOf(false) }
             var showCycleHistorySheet by remember { mutableStateOf(false) }
             var selectedTxnForEdit by remember { mutableStateOf<TransactionEntity?>(null) }
-            var alertFilter by remember { mutableStateOf("ALL") } // "ALL", "DEBIT", "CREDIT"
 
-            BackHandler(enabled = showCreditCardScreen) {
-                showCreditCardScreen = false
+            BackHandler(enabled = currentScreen != ActiveScreen.DASHBOARD) {
+                currentScreen = ActiveScreen.DASHBOARD
+                selectedVaultKey = null
             }
 
             ProvideCockpitColors(palette) {
@@ -138,7 +156,7 @@ class MainActivity : ComponentActivity() {
                         val totalCcOwed = snapshot?.creditTotalOwed ?: (currentStatementDue + unbilledVal)
                         val ccLimit = snapshot?.creditCardLimit ?: 42000.0
                         val avlLimit = snapshot?.creditAvailableLimit ?: (ccLimit - totalCcOwed)
-                        val cycleLabel = snapshot?.cycleLabel ?: "22 Oct – 21 Nov"
+                        val cycleLabel = snapshot?.cycleLabel ?: "Cycle: 22 Oct – 21 Nov"
                         val cyclePool = snapshot?.cycleStartingPool ?: 6380.0
 
                         val usableCashToday = (checkingCash - currentStatementDue).coerceAtLeast(0.0)
@@ -153,602 +171,561 @@ class MainActivity : ComponentActivity() {
                         val nextMonthCcCommitment = if (unbilledVal > 1000.0) 147.00 else unbilledVal
                         val projectedNextMonthBudget = (usableCashToday + expectedSalary - autoLoanEmi - nextMonthCcCommitment).coerceAtLeast(0.0)
 
-                        if (showCreditCardScreen) {
-                            CreditCardAnalyticsScreen(
-                                allTransactions = recentTxns,
-                                billedDue = currentStatementDue,
-                                dueDateLabel = dueDateLabel,
-                                unbilledSpend = unbilledVal,
-                                totalCardDebt = totalCcOwed,
-                                availableLimit = avlLimit,
-                                cardLimit = ccLimit,
-                                cycleLabel = cycleLabel,
-                                onBack = { showCreditCardScreen = false },
-                                onSelectTransaction = { selectedTxnForEdit = it }
-                            )
-                        } else {
-                            val filteredTxns = remember(recentTxns, alertFilter) {
-                                when (alertFilter) {
-                                    "DEBIT" -> recentTxns.filter { !it.isCreditCard }
-                                    "CREDIT" -> recentTxns.filter { it.isCreditCard }
-                                    else -> recentTxns
-                                }
-                            }
-
-                            LazyColumn(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 18.dp),
-                                contentPadding = PaddingValues(top = 20.dp, bottom = 32.dp),
-                                verticalArrangement = Arrangement.spacedBy(16.dp)
-                            ) {
-                                // 1. Minimalist Top Bar
-                                item {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column {
-                                            Text(
-                                                text = "Cockpit",
-                                                fontSize = 26.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                letterSpacing = (-0.5).sp,
-                                                color = palette.textPrimary
-                                            )
-                                            Text(
-                                                text = cycleLabel,
-                                                fontSize = 12.sp,
-                                                color = palette.textSecondary
-                                            )
-                                        }
-
-                                        Row(
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            // Cycle History Pill
-                                            Surface(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(12.dp))
-                                                    .clickable { showCycleHistorySheet = true },
-                                                shape = RoundedCornerShape(12.dp),
-                                                color = palette.surface,
-                                                border = BorderStroke(1.dp, palette.border)
-                                            ) {
-                                                Text(
-                                                    text = "Cycles",
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = palette.textPrimary,
-                                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 9.dp)
-                                                )
-                                            }
-
-                                            // Widget Style Pill (Brand -> System -> Mono)
-                                            Surface(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(12.dp))
-                                                    .clickable {
-                                                        val nextStyle = when (widgetStyle) {
-                                                            "BRAND" -> "SYSTEM"
-                                                            "SYSTEM" -> "MONO"
-                                                            else -> "BRAND"
-                                                        }
-                                                        widgetStyle = nextStyle
-                                                        prefs.edit().putString("widget_style", nextStyle).commit()
-                                                        coroutineScope.launch {
-                                                            CockpitWidget.forceUpdateAll(context)
-                                                            Toast.makeText(context, "Widget: $nextStyle", Toast.LENGTH_SHORT).show()
-                                                        }
-                                                    },
-                                                shape = RoundedCornerShape(12.dp),
-                                                color = palette.surface,
-                                                border = BorderStroke(1.dp, palette.border)
-                                            ) {
-                                                val styleLabel = when (widgetStyle) {
-                                                    "SYSTEM" -> "◈ Sys"
-                                                    "MONO" -> "◈ Mono"
-                                                    else -> "◈ Brand"
-                                                }
-                                                Text(
-                                                    text = styleLabel,
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = palette.textPrimary,
-                                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 9.dp)
-                                                )
-                                            }
-
-                                            // Theme Cycle Pill (Auto -> Light -> Dark)
-                                            Surface(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(12.dp))
-                                                    .clickable {
-                                                        val next = when (themeMode) {
-                                                            "SYSTEM" -> "LIGHT"
-                                                            "LIGHT" -> "DARK"
-                                                            else -> "SYSTEM"
-                                                        }
-                                                        themeMode = next
-                                                        prefs.edit().putString("theme_mode", next).commit()
-                                                        coroutineScope.launch {
-                                                            CockpitWidget.forceUpdateAll(context)
-                                                        }
-                                                    },
-                                                shape = RoundedCornerShape(12.dp),
-                                                color = palette.surface,
-                                                border = BorderStroke(1.dp, palette.border)
-                                            ) {
-                                                val modeLabel = when (themeMode) {
-                                                    "LIGHT" -> "☀"
-                                                    "DARK" -> "☾"
-                                                    else -> "◐"
-                                                }
-                                                Text(
-                                                    text = modeLabel,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = palette.textPrimary,
-                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
-                                                )
-                                            }
-
-                                            // Sync Button
-                                            Surface(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(12.dp))
-                                                    .clickable {
-                                                        simulatedModeOverride = null
-                                                        if (hasSmsPermission) {
-                                                            coroutineScope.launch {
-                                                                val count = SmsHistoryScanner.scanAndSyncInbox(context)
-                                                                CockpitWidget.forceUpdateAll(context)
-                                                                Toast.makeText(context, "Synced $count alerts", Toast.LENGTH_SHORT).show()
-                                                            }
-                                                        } else {
-                                                            val perms = mutableListOf(Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS)
-                                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                                                perms.add(Manifest.permission.POST_NOTIFICATIONS)
-                                                            }
-                                                            permissionLauncher.launch(perms.toTypedArray())
-                                                        }
-                                                    },
-                                                shape = RoundedCornerShape(12.dp),
-                                                color = palette.primaryAccent
-                                            ) {
-                                                Text(
-                                                    text = "↻ Sync",
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = Color.White,
-                                                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 9.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // 2. Signature Royal Violet Gradient Hero Card
-                                item {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(24.dp))
-                                            .background(palette.heroGradient)
-                                            .padding(22.dp)
-                                    ) {
-                                        Column(modifier = Modifier.fillMaxWidth()) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = "TRUE USABLE CASH",
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    letterSpacing = 1.sp,
-                                                    color = Color.White.copy(alpha = 0.78f)
-                                                )
-                                                Surface(
-                                                    shape = RoundedCornerShape(20.dp),
-                                                    color = Color.White.copy(alpha = 0.16f)
-                                                ) {
-                                                    Text(
-                                                        text = activeMode.first,
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        letterSpacing = 0.6.sp,
-                                                        color = Color.White,
-                                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                                    )
-                                                }
-                                            }
-
-                                            Spacer(modifier = Modifier.height(10.dp))
-
-                                            Text(
-                                                text = "AED ${String.format("%,.2f", usableCashToday)}",
-                                                fontSize = 36.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                letterSpacing = (-1).sp,
-                                                color = Color.White
-                                            )
-
-                                            Spacer(modifier = Modifier.height(4.dp))
-
-                                            Text(
-                                                text = if (currentStatementDue <= 0.01) {
-                                                    "Checking AED ${String.format("%,.2f", checkingCash)} • CC Bill Settled"
-                                                } else {
-                                                    "Checking AED ${String.format("%,.2f", checkingCash)} − Due AED ${String.format("%,.2f", currentStatementDue)}"
-                                                },
-                                                fontSize = 12.sp,
-                                                color = Color.White.copy(alpha = 0.75f)
-                                            )
-
-                                            Spacer(modifier = Modifier.height(18.dp))
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(1.dp)
-                                                    .background(Color.White.copy(alpha = 0.16f))
-                                            )
-                                            Spacer(modifier = Modifier.height(16.dp))
-
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Column {
-                                                    Text(
-                                                        text = "Safe Daily Pace",
-                                                        fontSize = 11.sp,
-                                                        color = Color.White.copy(alpha = 0.75f)
-                                                    )
-                                                    Spacer(modifier = Modifier.height(2.dp))
-                                                    Text(
-                                                        text = "AED ${String.format("%.0f", safeDaily)} / day",
-                                                        fontSize = 19.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = GoldTop
-                                                    )
-                                                }
-
-                                                Column(horizontalAlignment = Alignment.End) {
-                                                    Text(
-                                                        text = "Runway to 22nd",
-                                                        fontSize = 11.sp,
-                                                        color = Color.White.copy(alpha = 0.75f)
-                                                    )
-                                                    Spacer(modifier = Modifier.height(2.dp))
-                                                    Text(
-                                                        text = "$daysUntilPayday days left",
-                                                        fontSize = 16.sp,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        color = Color.White
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // 3. Clean Skywards Signature Card (Tap to open Card 3445 Analytics Screen)
-                                item {
-                                    Surface(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(22.dp))
-                                            .clickable { showCreditCardScreen = true },
-                                        shape = RoundedCornerShape(22.dp),
-                                        color = palette.surface,
-                                        border = BorderStroke(1.dp, palette.border)
-                                    ) {
-                                        Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(8.dp)
-                                                            .background(AmberTop, CircleShape)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(8.dp))
-                                                    Text(
-                                                        text = "Skywards Signature • 3445",
-                                                        fontSize = 13.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = palette.textPrimary
-                                                    )
-                                                }
-                                                Surface(
-                                                    shape = RoundedCornerShape(8.dp),
-                                                    color = palette.surfaceMuted
-                                                ) {
-                                                    Text(
-                                                        text = "Spend Breakdown ›",
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        color = palette.primaryAccent,
-                                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
-                                                    )
-                                                }
-                                            }
-
-                                            Spacer(modifier = Modifier.height(16.dp))
-
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween
-                                            ) {
-                                                Column {
-                                                    Text(
-                                                        text = if (currentStatementDue <= 0.01) "Statement ($dueDateLabel)" else "Billed Due ($dueDateLabel)",
-                                                        fontSize = 11.sp,
-                                                        color = palette.textSecondary
-                                                    )
-                                                    Spacer(modifier = Modifier.height(4.dp))
-                                                    Text(
-                                                        text = if (currentStatementDue <= 0.01) "Paid ✓" else "AED ${String.format("%,.2f", currentStatementDue)}",
-                                                        fontSize = 21.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = if (currentStatementDue <= 0.01) palette.positiveGreen else palette.amberAccent
-                                                    )
-                                                }
-
-                                                Column(horizontalAlignment = Alignment.End) {
-                                                    Text(
-                                                        text = "Unbilled Balance",
-                                                        fontSize = 11.sp,
-                                                        color = palette.textSecondary
-                                                    )
-                                                    Spacer(modifier = Modifier.height(4.dp))
-                                                    Text(
-                                                        text = "AED ${String.format("%,.2f", unbilledVal)}",
-                                                        fontSize = 21.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = palette.textPrimary
-                                                    )
-                                                }
-                                            }
-
-                                            Spacer(modifier = Modifier.height(14.dp))
-
-                                            val ccProgress = (totalCcOwed / ccLimit).toFloat().coerceIn(0f, 1f)
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(6.dp)
-                                                    .clip(CircleShape)
-                                                    .background(palette.surfaceMuted)
-                                            ) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth(ccProgress)
-                                                        .fillMaxHeight()
-                                                        .clip(CircleShape)
-                                                        .background(palette.amberGradient)
-                                                )
-                                            }
-
-                                            Spacer(modifier = Modifier.height(14.dp))
-                                            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(palette.border))
-                                            Spacer(modifier = Modifier.height(14.dp))
-
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Column {
-                                                    Text("22nd Liquid Forecast", fontSize = 11.sp, color = palette.textSecondary)
-                                                    Text(
-                                                        text = "AED ${String.format("%,.0f", projectedNextMonthBudget)}",
-                                                        fontSize = 16.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = palette.primaryAccent
-                                                    )
-                                                }
-                                                Column(horizontalAlignment = Alignment.End) {
-                                                    Text("Available Limit", fontSize = 11.sp, color = palette.textSecondary)
-                                                    Text(
-                                                        text = "AED ${String.format("%,.0f", avlLimit)} / 42k",
-                                                        fontSize = 14.sp,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        color = palette.textPrimary
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // 4. Vault Allocation Donut + Payday Simulator Pills
-                                item {
-                                    Surface(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = RoundedCornerShape(22.dp),
-                                        color = palette.surface,
-                                        border = BorderStroke(1.dp, palette.border)
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.fillMaxWidth().padding(20.dp),
-                                            horizontalAlignment = Alignment.CenterHorizontally
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = "Cash Vault Allocation",
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = palette.textPrimary
-                                                )
-                                                if (cyclePool > 0.0) {
-                                                    Text(
-                                                        text = "Pool AED ${String.format("%,.0f", cyclePool)}",
-                                                        fontSize = 11.sp,
-                                                        color = palette.textSecondary
-                                                    )
-                                                }
-                                            }
-
-                                            Spacer(modifier = Modifier.height(20.dp))
-                                            DonutChart(vaults = vaults, modifier = Modifier.size(176.dp))
-                                            Spacer(modifier = Modifier.height(20.dp))
-                                            DonutLegend(vaults = vaults)
-
-                                            Spacer(modifier = Modifier.height(18.dp))
-
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                            ) {
-                                                Surface(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .clip(RoundedCornerShape(12.dp))
-                                                        .clickable {
-                                                            coroutineScope.launch {
-                                                                val alloc = DynamicAllocationEngine.calculateDynamicSplit(9750.0)
-                                                                simulatedModeOverride = alloc.allocationMode to alloc.modeSubtitle
-                                                                dao.updateVaultBalances(listOf(
-                                                                    VaultBalanceEntity("RENT", alloc.rentVault, 0.0, alloc.rentVault),
-                                                                    VaultBalanceEntity("FIXED_OVERHEAD", alloc.fixedOverheadVault, 0.0, alloc.fixedOverheadVault),
-                                                                    VaultBalanceEntity("SUSTENANCE_FLEET", alloc.sustenanceFleetVault, 0.0, alloc.sustenanceFleetVault),
-                                                                    VaultBalanceEntity("DISCRETIONARY", alloc.discretionaryVault, 0.0, alloc.discretionaryVault),
-                                                                    VaultBalanceEntity("TRAVEL", alloc.travelVault, 0.0, alloc.travelVault),
-                                                                    VaultBalanceEntity("WEALTH_SURPLUS", alloc.wealthSurplusVault, 0.0, alloc.wealthSurplusVault)
-                                                                ))
-                                                            }
-                                                        },
-                                                    shape = RoundedCornerShape(12.dp),
-                                                    color = palette.surfaceMuted
-                                                ) {
-                                                    Box(
-                                                        modifier = Modifier.padding(vertical = 11.dp),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Text(
-                                                            text = "Sim 9,750 Payday",
-                                                            fontSize = 12.sp,
-                                                            fontWeight = FontWeight.SemiBold,
-                                                            color = palette.textPrimary
-                                                        )
-                                                    }
-                                                }
-
-                                                Surface(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .clip(RoundedCornerShape(12.dp))
-                                                        .clickable {
-                                                            coroutineScope.launch {
-                                                                val alloc = DynamicAllocationEngine.calculateDynamicSplit(17000.0)
-                                                                simulatedModeOverride = alloc.allocationMode to alloc.modeSubtitle
-                                                                dao.updateVaultBalances(listOf(
-                                                                    VaultBalanceEntity("RENT", alloc.rentVault, 0.0, alloc.rentVault),
-                                                                    VaultBalanceEntity("FIXED_OVERHEAD", alloc.fixedOverheadVault, 0.0, alloc.fixedOverheadVault),
-                                                                    VaultBalanceEntity("SUSTENANCE_FLEET", alloc.sustenanceFleetVault, 0.0, alloc.sustenanceFleetVault),
-                                                                    VaultBalanceEntity("DISCRETIONARY", alloc.discretionaryVault, 0.0, alloc.discretionaryVault),
-                                                                    VaultBalanceEntity("TRAVEL", alloc.travelVault, 0.0, alloc.travelVault),
-                                                                    VaultBalanceEntity("WEALTH_SURPLUS", alloc.wealthSurplusVault, 0.0, alloc.wealthSurplusVault)
-                                                                ))
-                                                            }
-                                                        },
-                                                    shape = RoundedCornerShape(12.dp),
-                                                    color = palette.primaryAccent
-                                                ) {
-                                                    Box(
-                                                        modifier = Modifier.padding(vertical = 11.dp),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Text(
-                                                            text = "Sim 17,000 Raise",
-                                                            fontSize = 12.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = Color.White
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // 5. Vault Ledger Header
-                                item {
-                                    Text(
-                                        text = "Vault Ledger",
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = palette.textPrimary,
-                                        modifier = Modifier.padding(top = 4.dp)
+                        AnimatedContent(
+                            targetState = currentScreen,
+                            transitionSpec = {
+                                (fadeIn(tween(240)) + slideInVertically(tween(260)) { it / 18 })
+                                    .togetherWith(fadeOut(tween(180)) + slideOutVertically(tween(180)) { -it / 24 })
+                            },
+                            label = "screen_transition"
+                        ) { screen ->
+                            when (screen) {
+                                ActiveScreen.DEBIT_ANALYTICS -> {
+                                    AccountAnalyticsScreen(
+                                        isCreditCard = false,
+                                        title = "Checking • 8691",
+                                        cycleLabel = cycleLabel,
+                                        allTransactions = recentTxns,
+                                        primaryMetricLabel = "CURRENT CYCLE DEBIT SPEND",
+                                        allTimeMetricLabel = "TOTAL SYNCED DEBIT SPEND",
+                                        heroGradient = palette.heroGradient,
+                                        leftStatLabel = "Usable Cash",
+                                        leftStatValue = "AED ${String.format("%,.2f", usableCashToday)}",
+                                        leftStatAccent = GoldTop,
+                                        midStatLabel = "Safe Daily Pace",
+                                        midStatValue = "AED ${String.format("%.0f", safeDaily)}/d",
+                                        rightStatLabel = "Runway",
+                                        rightStatValue = "${daysUntilPayday}d left",
+                                        onBack = { currentScreen = ActiveScreen.DASHBOARD },
+                                        onSelectTransaction = { selectedTxnForEdit = it }
                                     )
                                 }
 
-                                items(vaults) { vault ->
-                                    VaultItemCard(vault)
+                                ActiveScreen.CREDIT_ANALYTICS -> {
+                                    AccountAnalyticsScreen(
+                                        isCreditCard = true,
+                                        title = "Card 3445",
+                                        cycleLabel = cycleLabel,
+                                        allTransactions = recentTxns,
+                                        primaryMetricLabel = "CURRENT CYCLE CARD SPEND",
+                                        allTimeMetricLabel = "TOTAL SYNCED CARD SPEND",
+                                        heroGradient = Brush.linearGradient(listOf(PlumTop, VioletBot)),
+                                        leftStatLabel = "Billed ($dueDateLabel)",
+                                        leftStatValue = if (currentStatementDue <= 0.01) "Paid ✓" else "AED ${String.format("%,.2f", currentStatementDue)}",
+                                        leftStatAccent = GoldTop,
+                                        midStatLabel = "Unbilled",
+                                        midStatValue = "AED ${String.format("%,.2f", unbilledVal)}",
+                                        rightStatLabel = "Utilization",
+                                        rightStatValue = "${((totalCcOwed / ccLimit) * 100).toInt()}%",
+                                        onBack = { currentScreen = ActiveScreen.DASHBOARD },
+                                        onSelectTransaction = { selectedTxnForEdit = it }
+                                    )
                                 }
 
-                                // 6. Recent ENBD Alerts with All / Debit / Credit Filter Pills
-                                if (recentTxns.isNotEmpty()) {
-                                    item {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(top = 6.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = "Recent Alerts",
-                                                fontSize = 15.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = palette.textPrimary
-                                            )
+                                ActiveScreen.VAULT_DETAIL -> {
+                                    val activeVault = vaults.find { it.vaultKey == selectedVaultKey }
+                                    if (activeVault != null) {
+                                        VaultDetailScreen(
+                                            vault = activeVault,
+                                            allTransactions = recentTxns,
+                                            onBack = {
+                                                currentScreen = ActiveScreen.DASHBOARD
+                                                selectedVaultKey = null
+                                            },
+                                            onSelectTransaction = { selectedTxnForEdit = it }
+                                        )
+                                    } else {
+                                        currentScreen = ActiveScreen.DASHBOARD
+                                    }
+                                }
 
-                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                listOf("ALL" to "All", "DEBIT" to "Debit", "CREDIT" to "Credit").forEach { (key, label) ->
-                                                    val selected = alertFilter == key
+                                ActiveScreen.DASHBOARD -> {
+                                    LazyColumn(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(horizontal = 18.dp),
+                                        contentPadding = PaddingValues(top = 20.dp, bottom = 32.dp),
+                                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                                    ) {
+                                        // 1. Minimalist Top Bar (Title + Cycles + Settings Gear + Sync)
+                                        item {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column {
+                                                    Text(
+                                                        text = "Cockpit",
+                                                        fontSize = 24.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        letterSpacing = (-0.5).sp,
+                                                        color = palette.textPrimary
+                                                    )
+                                                    Text(
+                                                        text = cycleLabel,
+                                                        fontSize = 12.sp,
+                                                        color = palette.textSecondary
+                                                    )
+                                                }
+
+                                                Row(
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    // Cycles History Pill
                                                     Surface(
                                                         modifier = Modifier
-                                                            .clip(RoundedCornerShape(10.dp))
-                                                            .clickable { alertFilter = key },
-                                                        shape = RoundedCornerShape(10.dp),
-                                                        color = if (selected) palette.primaryAccent else palette.surface,
-                                                        border = if (selected) null else BorderStroke(1.dp, palette.border)
+                                                            .height(36.dp)
+                                                            .clip(RoundedCornerShape(12.dp))
+                                                            .clickable { showCycleHistorySheet = true },
+                                                        shape = RoundedCornerShape(12.dp),
+                                                        color = palette.surface,
+                                                        border = BorderStroke(1.dp, palette.border)
                                                     ) {
-                                                        Text(
-                                                            text = label,
-                                                            fontSize = 11.sp,
-                                                            fontWeight = FontWeight.SemiBold,
-                                                            color = if (selected) Color.White else palette.textSecondary,
-                                                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp)
-                                                        )
+                                                        Box(
+                                                            modifier = Modifier.padding(horizontal = 12.dp),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Text(
+                                                                text = "Cycles",
+                                                                fontSize = 12.sp,
+                                                                fontWeight = FontWeight.SemiBold,
+                                                                color = palette.textPrimary
+                                                            )
+                                                        }
+                                                    }
+
+                                                    // Settings Gear Button (Theme, Widget Style, Simulators)
+                                                    Surface(
+                                                        modifier = Modifier
+                                                            .size(36.dp)
+                                                            .clip(RoundedCornerShape(12.dp))
+                                                            .clickable { showSettingsSheet = true },
+                                                        shape = RoundedCornerShape(12.dp),
+                                                        color = palette.surface,
+                                                        border = BorderStroke(1.dp, palette.border)
+                                                    ) {
+                                                        Box(contentAlignment = Alignment.Center) {
+                                                            Icon(
+                                                                imageVector = Icons.Outlined.Settings,
+                                                                contentDescription = "Settings",
+                                                                tint = palette.textPrimary,
+                                                                modifier = Modifier.size(18.dp)
+                                                            )
+                                                        }
+                                                    }
+
+                                                    // Sync Button
+                                                    Surface(
+                                                        modifier = Modifier
+                                                            .height(36.dp)
+                                                            .clip(RoundedCornerShape(12.dp))
+                                                            .clickable {
+                                                                simulatedModeOverride = null
+                                                                if (hasSmsPermission) {
+                                                                    coroutineScope.launch {
+                                                                        val count = SmsHistoryScanner.scanAndSyncInbox(context)
+                                                                        CockpitWidget.forceUpdateAll(context)
+                                                                        Toast.makeText(context, "Synced $count alerts", Toast.LENGTH_SHORT).show()
+                                                                    }
+                                                                } else {
+                                                                    val perms = mutableListOf(Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS)
+                                                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                                                        perms.add(Manifest.permission.POST_NOTIFICATIONS)
+                                                                    }
+                                                                    permissionLauncher.launch(perms.toTypedArray())
+                                                                }
+                                                            },
+                                                        shape = RoundedCornerShape(12.dp),
+                                                        color = palette.primaryAccent
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier.padding(horizontal = 13.dp),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Text(
+                                                                text = "↻ Sync",
+                                                                fontSize = 12.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = Color.White
+                                                            )
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
-                                    }
 
-                                    items(filteredTxns, key = { it.id }) { txn ->
-                                        TransactionRowCard(
-                                            txn = txn,
-                                            onClick = { selectedTxnForEdit = txn }
-                                        )
+                                        // 2. Royal Violet Hero Card (Clickable -> Opens Checking / Debit Spend Breakdown)
+                                        item {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(24.dp))
+                                                    .background(palette.heroGradient)
+                                                    .clickable { currentScreen = ActiveScreen.DEBIT_ANALYTICS }
+                                                    .padding(22.dp)
+                                            ) {
+                                                Column(modifier = Modifier.fillMaxWidth()) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text(
+                                                            text = "TRUE USABLE CASH",
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            letterSpacing = 1.sp,
+                                                            color = Color.White.copy(alpha = 0.78f)
+                                                        )
+                                                        Surface(
+                                                            shape = RoundedCornerShape(20.dp),
+                                                            color = Color.White.copy(alpha = 0.16f)
+                                                        ) {
+                                                            Text(
+                                                                text = activeMode.first,
+                                                                fontSize = 10.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                letterSpacing = 0.6.sp,
+                                                                color = Color.White,
+                                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                                            )
+                                                        }
+                                                    }
+
+                                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                                    Text(
+                                                        text = "AED ${String.format("%,.2f", usableCashToday)}",
+                                                        fontSize = 36.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        letterSpacing = (-1).sp,
+                                                        color = Color.White
+                                                    )
+
+                                                    Spacer(modifier = Modifier.height(4.dp))
+
+                                                    Text(
+                                                        text = if (currentStatementDue <= 0.01) {
+                                                            "Checking AED ${String.format("%,.2f", checkingCash)} • CC Bill Settled"
+                                                        } else {
+                                                            "Checking AED ${String.format("%,.2f", checkingCash)} − Due AED ${String.format("%,.2f", currentStatementDue)}"
+                                                        },
+                                                        fontSize = 12.sp,
+                                                        color = Color.White.copy(alpha = 0.75f)
+                                                    )
+
+                                                    Spacer(modifier = Modifier.height(18.dp))
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .height(1.dp)
+                                                            .background(Color.White.copy(alpha = 0.16f))
+                                                    )
+                                                    Spacer(modifier = Modifier.height(16.dp))
+
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Column {
+                                                            Text(
+                                                                text = "Safe Daily Pace",
+                                                                fontSize = 11.sp,
+                                                                color = Color.White.copy(alpha = 0.75f)
+                                                            )
+                                                            Spacer(modifier = Modifier.height(2.dp))
+                                                            Text(
+                                                                text = "AED ${String.format("%.0f", safeDaily)} / day",
+                                                                fontSize = 18.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = GoldTop
+                                                            )
+                                                        }
+
+                                                        Column(horizontalAlignment = Alignment.End) {
+                                                            Text(
+                                                                text = "Runway to 22nd",
+                                                                fontSize = 11.sp,
+                                                                color = Color.White.copy(alpha = 0.75f)
+                                                            )
+                                                            Spacer(modifier = Modifier.height(2.dp))
+                                                            Text(
+                                                                text = "$daysUntilPayday days left",
+                                                                fontSize = 16.sp,
+                                                                fontWeight = FontWeight.SemiBold,
+                                                                color = Color.White
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // 3. Skywards Signature Card (Entire card clickable, no Spend Breakdown pill)
+                                        item {
+                                            Surface(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(22.dp))
+                                                    .clickable { currentScreen = ActiveScreen.CREDIT_ANALYTICS },
+                                                shape = RoundedCornerShape(22.dp),
+                                                color = palette.surface,
+                                                border = BorderStroke(1.dp, palette.border)
+                                            ) {
+                                                Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .size(8.dp)
+                                                                    .background(AmberTop, CircleShape)
+                                                            )
+                                                            Spacer(modifier = Modifier.width(8.dp))
+                                                            Text(
+                                                                text = "Skywards Signature • 3445",
+                                                                fontSize = 14.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = palette.textPrimary
+                                                            )
+                                                        }
+                                                        Text(
+                                                            text = "›",
+                                                            fontSize = 18.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            color = palette.textSecondary
+                                                        )
+                                                    }
+
+                                                    Spacer(modifier = Modifier.height(16.dp))
+
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween
+                                                    ) {
+                                                        Column {
+                                                            Text(
+                                                                text = if (currentStatementDue <= 0.01) "Statement ($dueDateLabel)" else "Billed Due ($dueDateLabel)",
+                                                                fontSize = 11.sp,
+                                                                color = palette.textSecondary
+                                                            )
+                                                            Spacer(modifier = Modifier.height(4.dp))
+                                                            Text(
+                                                                text = if (currentStatementDue <= 0.01) "Paid ✓" else "AED ${String.format("%,.2f", currentStatementDue)}",
+                                                                fontSize = 21.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = if (currentStatementDue <= 0.01) palette.positiveGreen else palette.amberAccent
+                                                            )
+                                                        }
+
+                                                        Column(horizontalAlignment = Alignment.End) {
+                                                            Text(
+                                                                text = "Unbilled Balance",
+                                                                fontSize = 11.sp,
+                                                                color = palette.textSecondary
+                                                            )
+                                                            Spacer(modifier = Modifier.height(4.dp))
+                                                            Text(
+                                                                text = "AED ${String.format("%,.2f", unbilledVal)}",
+                                                                fontSize = 21.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = palette.textPrimary
+                                                            )
+                                                        }
+                                                    }
+
+                                                    Spacer(modifier = Modifier.height(14.dp))
+
+                                                    val ccProgress = (totalCcOwed / ccLimit).toFloat().coerceIn(0f, 1f)
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .height(6.dp)
+                                                            .clip(CircleShape)
+                                                            .background(palette.surfaceMuted)
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth(ccProgress)
+                                                                .fillMaxHeight()
+                                                                .clip(CircleShape)
+                                                                .background(palette.amberGradient)
+                                                        )
+                                                    }
+
+                                                    Spacer(modifier = Modifier.height(14.dp))
+                                                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(palette.border))
+                                                    Spacer(modifier = Modifier.height(14.dp))
+
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Column {
+                                                            Text("22nd Liquid Forecast", fontSize = 11.sp, color = palette.textSecondary)
+                                                            Text(
+                                                                text = "AED ${String.format("%,.0f", projectedNextMonthBudget)}",
+                                                                fontSize = 16.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = palette.primaryAccent
+                                                            )
+                                                        }
+                                                        Column(horizontalAlignment = Alignment.End) {
+                                                            Text("Available Limit", fontSize = 11.sp, color = palette.textSecondary)
+                                                            Text(
+                                                                text = "AED ${String.format("%,.0f", avlLimit)} / 42k",
+                                                                fontSize = 14.sp,
+                                                                fontWeight = FontWeight.SemiBold,
+                                                                color = palette.textPrimary
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // 4. Clean Cash Vault Allocation Card (Simulator buttons moved to Settings)
+                                        item {
+                                            Surface(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                shape = RoundedCornerShape(22.dp),
+                                                color = palette.surface,
+                                                border = BorderStroke(1.dp, palette.border)
+                                            ) {
+                                                Column(
+                                                    modifier = Modifier.fillMaxWidth().padding(20.dp),
+                                                    horizontalAlignment = Alignment.CenterHorizontally
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text(
+                                                            text = "Cash Vault Allocation",
+                                                            fontSize = 14.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = palette.textPrimary
+                                                        )
+                                                        if (cyclePool > 0.0) {
+                                                            Text(
+                                                                text = "Pool AED ${String.format("%,.0f", cyclePool)}",
+                                                                fontSize = 11.sp,
+                                                                color = palette.textSecondary
+                                                            )
+                                                        }
+                                                    }
+
+                                                    Spacer(modifier = Modifier.height(20.dp))
+                                                    DonutChart(vaults = vaults, modifier = Modifier.size(176.dp))
+                                                    Spacer(modifier = Modifier.height(20.dp))
+                                                    DonutLegend(vaults = vaults)
+                                                }
+                                            }
+                                        }
+
+                                        // 5. Vault Ledger Header + Clickable Vault Cards
+                                        item {
+                                            Text(
+                                                text = "Vault Ledger",
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = palette.textPrimary,
+                                                modifier = Modifier.padding(top = 4.dp)
+                                            )
+                                        }
+
+                                        items(vaults, key = { it.vaultKey }) { vault ->
+                                            VaultItemCard(
+                                                vault = vault,
+                                                onClick = {
+                                                    selectedVaultKey = vault.vaultKey
+                                                    currentScreen = ActiveScreen.VAULT_DETAIL
+                                                }
+                                            )
+                                        }
+
+                                        // 6. Clean Recent Alerts (All transactions, no filter pills)
+                                        if (recentTxns.isNotEmpty()) {
+                                            item {
+                                                Text(
+                                                    text = "Recent Alerts",
+                                                    fontSize = 15.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = palette.textPrimary,
+                                                    modifier = Modifier.padding(top = 6.dp)
+                                                )
+                                            }
+
+                                            items(recentTxns, key = { it.id }) { txn ->
+                                                TransactionRowCard(
+                                                    txn = txn,
+                                                    onClick = { selectedTxnForEdit = txn }
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
+                        }
+
+                        // Settings Bottom Sheet (Theme, Widget Style, Payday/Raise/Custom Simulators)
+                        if (showSettingsSheet) {
+                            SettingsBottomSheet(
+                                themeMode = themeMode,
+                                widgetStyle = widgetStyle,
+                                isSimulationActive = simulatedModeOverride != null,
+                                onSelectTheme = { next ->
+                                    themeMode = next
+                                    prefs.edit().putString("theme_mode", next).commit()
+                                    coroutineScope.launch { CockpitWidget.forceUpdateAll(context) }
+                                },
+                                onSelectWidgetStyle = { nextStyle ->
+                                    widgetStyle = nextStyle
+                                    prefs.edit().putString("widget_style", nextStyle).commit()
+                                    coroutineScope.launch {
+                                        CockpitWidget.forceUpdateAll(context)
+                                        Toast.makeText(context, "Widget: $nextStyle", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                onSimulateAmount = { simAmount ->
+                                    coroutineScope.launch {
+                                        val alloc = DynamicAllocationEngine.calculateDynamicSplit(simAmount)
+                                        simulatedModeOverride = alloc.allocationMode to alloc.modeSubtitle
+                                        dao.updateVaultBalances(listOf(
+                                            VaultBalanceEntity("RENT", alloc.rentVault, 0.0, alloc.rentVault),
+                                            VaultBalanceEntity("FIXED_OVERHEAD", alloc.fixedOverheadVault, 0.0, alloc.fixedOverheadVault),
+                                            VaultBalanceEntity("SUSTENANCE_FLEET", alloc.sustenanceFleetVault, 0.0, alloc.sustenanceFleetVault),
+                                            VaultBalanceEntity("DISCRETIONARY", alloc.discretionaryVault, 0.0, alloc.discretionaryVault),
+                                            VaultBalanceEntity("TRAVEL", alloc.travelVault, 0.0, alloc.travelVault),
+                                            VaultBalanceEntity("WEALTH_SURPLUS", alloc.wealthSurplusVault, 0.0, alloc.wealthSurplusVault)
+                                        ))
+                                        showSettingsSheet = false
+                                        Toast.makeText(
+                                            context,
+                                            "Simulated AED ${String.format("%,.0f", simAmount)} (${alloc.allocationMode})",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                },
+                                onResetSimulation = {
+                                    simulatedModeOverride = null
+                                    coroutineScope.launch {
+                                        SmsHistoryScanner.recomputeLedgerFromDb(context)
+                                        CockpitWidget.forceUpdateAll(context)
+                                        showSettingsSheet = false
+                                        Toast.makeText(context, "Restored live SMS balances", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                onDismiss = { showSettingsSheet = false }
+                            )
                         }
 
                         // Tap-to-Reclassify Bottom Sheet
@@ -805,16 +782,26 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * Shared Analytics Screen for both Checking/Debit (isCreditCard = false) and Credit Card (isCreditCard = true).
+ * Matches the exact top bar height, Hero Card dimensions/placement, and second-card placement of the main screen.
+ */
 @Composable
-fun CreditCardAnalyticsScreen(
-    allTransactions: List<TransactionEntity>,
-    billedDue: Double,
-    dueDateLabel: String,
-    unbilledSpend: Double,
-    totalCardDebt: Double,
-    availableLimit: Double,
-    cardLimit: Double,
+fun AccountAnalyticsScreen(
+    isCreditCard: Boolean,
+    title: String,
     cycleLabel: String,
+    allTransactions: List<TransactionEntity>,
+    primaryMetricLabel: String,
+    allTimeMetricLabel: String,
+    heroGradient: Brush,
+    leftStatLabel: String,
+    leftStatValue: String,
+    leftStatAccent: Color,
+    midStatLabel: String,
+    midStatValue: String,
+    rightStatLabel: String,
+    rightStatValue: String,
     onBack: () -> Unit,
     onSelectTransaction: (TransactionEntity) -> Unit
 ) {
@@ -822,16 +809,16 @@ fun CreditCardAnalyticsScreen(
     var scopeFilter by remember { mutableStateOf("CYCLE") } // "CYCLE" or "ALL"
     var selectedCategory by remember { mutableStateOf<String?>(null) }
 
-    val cardTxns = remember(allTransactions, scopeFilter) {
+    val accountTxns = remember(allTransactions, isCreditCard, scopeFilter) {
         allTransactions.filter {
-            it.isCreditCard && !it.isInternalTransfer && (scopeFilter == "ALL" || it.isCurrentCycle)
+            it.isCreditCard == isCreditCard && !it.isInternalTransfer && (scopeFilter == "ALL" || it.isCurrentCycle)
         }
     }
 
-    val totalPeriodSpend = remember(cardTxns) { cardTxns.sumOf { it.amount } }
+    val totalPeriodSpend = remember(accountTxns) { accountTxns.sumOf { it.amount } }
 
-    val categoryBreakdown = remember(cardTxns) {
-        cardTxns
+    val categoryBreakdown = remember(accountTxns) {
+        accountTxns
             .groupBy { it.subTag }
             .map { (tag, list) ->
                 Triple(tag, list.sumOf { it.amount }, list.size)
@@ -839,8 +826,8 @@ fun CreditCardAnalyticsScreen(
             .sortedByDescending { it.second }
     }
 
-    val displayedCardTxns = remember(cardTxns, selectedCategory) {
-        if (selectedCategory == null) cardTxns else cardTxns.filter { it.subTag == selectedCategory }
+    val displayedTxns = remember(accountTxns, selectedCategory) {
+        if (selectedCategory == null) accountTxns else accountTxns.filter { it.subTag == selectedCategory }
     }
 
     LazyColumn(
@@ -850,7 +837,7 @@ fun CreditCardAnalyticsScreen(
         contentPadding = PaddingValues(top = 20.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Top Header with Back Pill & Scope Switcher
+        // 1. Top Bar (Identical height & alignment to Dashboard Top Bar)
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -860,125 +847,168 @@ fun CreditCardAnalyticsScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         modifier = Modifier
+                            .height(36.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .clickable { onBack() },
                         shape = RoundedCornerShape(12.dp),
                         color = palette.surface,
                         border = BorderStroke(1.dp, palette.border)
                     ) {
-                        Text(
-                            text = "← Back",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = palette.textPrimary,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                        )
+                        Box(
+                            modifier = Modifier.padding(horizontal = 11.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "← Back",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = palette.textPrimary
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
-                            text = "Card 3445",
-                            fontSize = 22.sp,
+                            text = title,
+                            fontSize = 24.sp,
                             fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.5).sp,
                             color = palette.textPrimary
                         )
                         Text(
                             text = cycleLabel,
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             color = palette.textSecondary
                         )
                     }
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("CYCLE" to "This Cycle", "ALL" to "All Synced").forEach { (key, label) ->
+                    listOf("CYCLE" to "Cycle", "ALL" to "All").forEach { (key, label) ->
                         val active = scopeFilter == key
                         Surface(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
+                                .height(36.dp)
+                                .clip(RoundedCornerShape(12.dp))
                                 .clickable {
                                     scopeFilter = key
                                     selectedCategory = null
                                 },
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(12.dp),
                             color = if (active) palette.primaryAccent else palette.surface,
                             border = if (active) null else BorderStroke(1.dp, palette.border)
                         ) {
-                            Text(
-                                text = label,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (active) Color.White else palette.textSecondary,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                            )
+                            Box(
+                                modifier = Modifier.padding(horizontal = 11.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (active) Color.White else palette.textSecondary
+                                )
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Amber-Plum Gradient Hero Card for Card 3445
+        // 2. Hero Card (Identical dimensions, padding & internal spacing as True Usable Cash card)
         item {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(24.dp))
-                    .background(Brush.linearGradient(listOf(PlumTop, VioletBot)))
+                    .background(heroGradient)
                     .padding(22.dp)
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = if (scopeFilter == "CYCLE") "CURRENT CYCLE CARD SPEND" else "TOTAL SYNCED CARD SPEND",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 1.sp,
-                        color = Color.White.copy(alpha = 0.78f)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (scopeFilter == "CYCLE") primaryMetricLabel else allTimeMetricLabel,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 1.sp,
+                            color = Color.White.copy(alpha = 0.78f)
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = Color.White.copy(alpha = 0.16f)
+                        ) {
+                            Text(
+                                text = "${accountTxns.size} TXNS",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.6.sp,
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
                     Text(
                         text = "AED ${String.format("%,.2f", totalPeriodSpend)}",
-                        fontSize = 34.sp,
+                        fontSize = 36.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = (-1).sp,
                         color = Color.White
                     )
+
                     Spacer(modifier = Modifier.height(4.dp))
+
                     Text(
-                        text = "${cardTxns.size} card transactions • Limit AED ${String.format("%,.0f", availableLimit)} available",
+                        text = "${categoryBreakdown.size} active spending categories",
                         fontSize = 12.sp,
                         color = Color.White.copy(alpha = 0.75f)
                     )
 
+                    Spacer(modifier = Modifier.height(18.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Color.White.copy(alpha = 0.16f))
+                    )
                     Spacer(modifier = Modifier.height(16.dp))
-                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.16f)))
-                    Spacer(modifier = Modifier.height(14.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text("Billed ($dueDateLabel)", fontSize = 11.sp, color = Color.White.copy(alpha = 0.75f))
+                            Text(leftStatLabel, fontSize = 11.sp, color = Color.White.copy(alpha = 0.75f))
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = if (billedDue <= 0.01) "Paid ✓" else "AED ${String.format("%,.2f", billedDue)}",
-                                fontSize = 16.sp,
+                                text = leftStatValue,
+                                fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (billedDue <= 0.01) GoldTop else Color.White
+                                color = leftStatAccent
                             )
                         }
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Unbilled", fontSize = 11.sp, color = Color.White.copy(alpha = 0.75f))
+                            Text(midStatLabel, fontSize = 11.sp, color = Color.White.copy(alpha = 0.75f))
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "AED ${String.format("%,.2f", unbilledSpend)}",
+                                text = midStatValue,
                                 fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.SemiBold,
                                 color = Color.White
                             )
                         }
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("Utilization", fontSize = 11.sp, color = Color.White.copy(alpha = 0.75f))
+                            Text(rightStatLabel, fontSize = 11.sp, color = Color.White.copy(alpha = 0.75f))
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "${((totalCardDebt / cardLimit) * 100).toInt()}%",
+                                text = rightStatValue,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = GoldTop
@@ -989,7 +1019,7 @@ fun CreditCardAnalyticsScreen(
             }
         }
 
-        // Spending Donut Chart + Category Breakdown Bars
+        // 3. Where You Spent Donut + Category Bars (Aligned at exact Y-offset of Skywards Signature card)
         item {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
@@ -1031,7 +1061,6 @@ fun CreditCardAnalyticsScreen(
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    // Category Pie / Donut Chart
                     Box(modifier = Modifier.size(180.dp), contentAlignment = Alignment.Center) {
                         Canvas(modifier = Modifier.fillMaxSize()) {
                             val strokeWidth = 22.dp.toPx()
@@ -1086,7 +1115,6 @@ fun CreditCardAnalyticsScreen(
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    // Interactive Category Bars
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         categoryBreakdown.forEach { (tag, amt, count) ->
                             val share = if (totalPeriodSpend > 0.0) (amt / totalPeriodSpend).toFloat().coerceIn(0f, 1f) else 0f
@@ -1173,7 +1201,7 @@ fun CreditCardAnalyticsScreen(
             }
         }
 
-        // Card 3445 Transactions Header
+        // 4. Filtered Transactions Header & Rows
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1181,7 +1209,7 @@ fun CreditCardAnalyticsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = selectedCategory?.let { "$it Purchases" } ?: "Card 3445 Transactions",
+                    text = selectedCategory?.let { "$it Purchases" } ?: "$title Transactions",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     color = palette.textPrimary
@@ -1194,11 +1222,352 @@ fun CreditCardAnalyticsScreen(
             }
         }
 
-        items(displayedCardTxns, key = { it.id }) { txn ->
+        items(displayedTxns, key = { it.id }) { txn ->
             TransactionRowCard(
                 txn = txn,
                 onClick = { onSelectTransaction(txn) }
             )
+        }
+    }
+}
+
+/**
+ * Vault Ledger Drill-Down Screen:
+ * Shifts the tapped Vault Card up to the top and reveals all current-cycle transactions that affected it.
+ */
+@Composable
+fun VaultDetailScreen(
+    vault: VaultBalanceEntity,
+    allTransactions: List<TransactionEntity>,
+    onBack: () -> Unit,
+    onSelectTransaction: (TransactionEntity) -> Unit
+) {
+    val palette = LocalCockpitColors.current
+
+    val affectingTxns = remember(allTransactions, vault.vaultKey) {
+        allTransactions.filter {
+            it.isCurrentCycle && !it.isInternalTransfer && it.deducedVault == vault.vaultKey
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 18.dp),
+        contentPadding = PaddingValues(top = 20.dp, bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        modifier = Modifier
+                            .height(36.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onBack() },
+                        shape = RoundedCornerShape(12.dp),
+                        color = palette.surface,
+                        border = BorderStroke(1.dp, palette.border)
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(horizontal = 11.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "← Vaults",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = palette.textPrimary
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Vault Ledger",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = palette.textPrimary
+                    )
+                }
+
+                Text(
+                    text = "${affectingTxns.size} txns this cycle",
+                    fontSize = 11.sp,
+                    color = palette.textSecondary
+                )
+            }
+        }
+
+        // Highlighted Vault Card at the top
+        item {
+            VaultItemCard(vault = vault, onClick = { onBack() })
+        }
+
+        if (affectingTxns.isEmpty()) {
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    color = palette.surface,
+                    border = BorderStroke(1.dp, palette.border)
+                ) {
+                    Text(
+                        text = "No transactions affected ${formatVaultLabel(vault.vaultKey)} in the current cycle.",
+                        fontSize = 13.sp,
+                        color = palette.textSecondary,
+                        modifier = Modifier.padding(20.dp)
+                    )
+                }
+            }
+        } else {
+            items(affectingTxns, key = { it.id }) { txn ->
+                TransactionRowCard(
+                    txn = txn,
+                    onClick = { onSelectTransaction(txn) }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Settings Modal Sheet: Houses Theme Mode, Widget Style, and Payday/Raise/Custom Simulators.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsBottomSheet(
+    themeMode: String,
+    widgetStyle: String,
+    isSimulationActive: Boolean,
+    onSelectTheme: (String) -> Unit,
+    onSelectWidgetStyle: (String) -> Unit,
+    onSimulateAmount: (Double) -> Unit,
+    onResetSimulation: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val palette = LocalCockpitColors.current
+    var customAmountText by remember { mutableStateOf("") }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = palette.surface,
+        contentColor = palette.textPrimary
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            Text(
+                text = "Cockpit Settings",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = palette.textPrimary
+            )
+
+            // 1. App & Widget Theme
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Appearance Theme",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("SYSTEM" to "◐ Auto", "LIGHT" to "☀ Light", "DARK" to "☾ Dark").forEach { (key, label) ->
+                        val selected = themeMode == key
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onSelectTheme(key) },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (selected) palette.primaryAccent else palette.surfaceMuted
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(vertical = 11.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (selected) Color.White else palette.textPrimary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Widget Style
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Home Widget Style",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("BRAND" to "◈ Brand", "SYSTEM" to "◈ System", "MONO" to "◈ Mono").forEach { (key, label) ->
+                        val selected = widgetStyle == key
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onSelectWidgetStyle(key) },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (selected) palette.primaryAccent else palette.surfaceMuted
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(vertical = 11.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (selected) Color.White else palette.textPrimary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(palette.border))
+
+            // 3. Payday & Mode Simulator (with Custom Amount)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Payday & Mode Simulator",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = palette.textPrimary
+                    )
+                    if (isSimulationActive) {
+                        Text(
+                            text = "Reset to Live",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = palette.amberAccent,
+                            modifier = Modifier.clickable { onResetSimulation() }
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onSimulateAmount(9750.0) },
+                        shape = RoundedCornerShape(12.dp),
+                        color = palette.surfaceMuted
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Sim 9,750 Payday",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = palette.textPrimary
+                            )
+                        }
+                    }
+
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onSimulateAmount(17000.0) },
+                        shape = RoundedCornerShape(12.dp),
+                        color = palette.primaryAccent
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Sim 17,000 Raise",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+
+                // Custom Amount Input + Test Trigger
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = customAmountText,
+                        onValueChange = { input ->
+                            if (input.all { it.isDigit() || it == '.' }) {
+                                customAmountText = input
+                            }
+                        },
+                        placeholder = { Text("Custom Amount (AED)", fontSize = 13.sp) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Surface(
+                        modifier = Modifier
+                            .height(54.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable {
+                                val parsed = customAmountText.toDoubleOrNull()
+                                if (parsed != null && parsed >= 0.0) {
+                                    onSimulateAmount(parsed)
+                                }
+                            },
+                        shape = RoundedCornerShape(12.dp),
+                        color = palette.primaryAccent
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(horizontal = 18.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Test",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1253,28 +1622,20 @@ fun ReclassifyTransactionSheet(
                 .padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = txn.merchant,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = palette.textPrimary
-                    )
-                    Text(
-                        text = "${if (txn.isCreditCard) "Card 3445" else "Checking 8691"} • AED ${String.format("%,.2f", txn.amount)}",
-                        fontSize = 12.sp,
-                        color = palette.textSecondary
-                    )
-                }
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = txn.merchant,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary
+                )
+                Text(
+                    text = "${if (txn.isCreditCard) "Card 3445" else "Checking 8691"} • AED ${String.format("%,.2f", txn.amount)}",
+                    fontSize = 12.sp,
+                    color = palette.textSecondary
+                )
             }
 
-            // Raw SMS Preview Box
             Surface(
                 shape = RoundedCornerShape(12.dp),
                 color = palette.surfaceMuted
@@ -1288,7 +1649,6 @@ fun ReclassifyTransactionSheet(
                 )
             }
 
-            // Vault Selection
             Text(
                 text = "Assign Vault",
                 fontSize = 13.sp,
@@ -1329,7 +1689,6 @@ fun ReclassifyTransactionSheet(
                 }
             }
 
-            // SubTag Selection
             Text(
                 text = "Assign #SubTag",
                 fontSize = 13.sp,
@@ -1373,7 +1732,6 @@ fun ReclassifyTransactionSheet(
                 }
             }
 
-            // Remember Rule Toggle
             Surface(
                 shape = RoundedCornerShape(14.dp),
                 color = palette.surfaceMuted
@@ -1405,7 +1763,6 @@ fun ReclassifyTransactionSheet(
                 }
             }
 
-            // Save Button
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1668,7 +2025,10 @@ fun DonutLegend(vaults: List<VaultBalanceEntity>) {
 }
 
 @Composable
-fun VaultItemCard(vault: VaultBalanceEntity) {
+fun VaultItemCard(
+    vault: VaultBalanceEntity,
+    onClick: () -> Unit = {}
+) {
     val palette = LocalCockpitColors.current
     val gradPair = getVaultPalettePair(vault.vaultKey)
     val solidAccent = getVaultSolidColor(vault.vaultKey, palette.isDark)
@@ -1680,7 +2040,10 @@ fun VaultItemCard(vault: VaultBalanceEntity) {
     )
 
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .clickable { onClick() },
         shape = RoundedCornerShape(18.dp),
         color = palette.surface,
         border = BorderStroke(1.dp, palette.border)
