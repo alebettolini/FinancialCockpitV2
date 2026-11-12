@@ -1,6 +1,7 @@
 package com.bettolini.financialcockpit
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.Toast
@@ -15,6 +16,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -24,8 +26,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -40,6 +44,7 @@ import com.bettolini.financialcockpit.data.SmsHistoryScanner
 import com.bettolini.financialcockpit.data.TransactionEntity
 import com.bettolini.financialcockpit.data.VaultBalanceEntity
 import com.bettolini.financialcockpit.domain.DynamicAllocationEngine
+import com.bettolini.financialcockpit.ui.theme.*
 import com.bettolini.financialcockpit.widget.CockpitWidget
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -52,10 +57,24 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val dao = AppDatabase.getInstance(this).financeDao()
+        val prefs = getSharedPreferences("cockpit_ui_prefs", Context.MODE_PRIVATE)
 
         setContent {
             val context = LocalContext.current
             val coroutineScope = rememberCoroutineScope()
+
+            // Theme preference: "SYSTEM", "LIGHT", "DARK"
+            var themeMode by remember {
+                mutableStateOf(prefs.getString("theme_mode", "SYSTEM") ?: "SYSTEM")
+            }
+            val systemDark = isSystemInDarkTheme()
+            val isDark = when (themeMode) {
+                "DARK" -> true
+                "LIGHT" -> false
+                else -> systemDark
+            }
+            val palette = if (isDark) DarkCockpitColors else LightCockpitColors
+
             var hasSmsPermission by remember {
                 mutableStateOf(
                     ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
@@ -70,395 +89,532 @@ class MainActivity : ComponentActivity() {
                     coroutineScope.launch {
                         val count = SmsHistoryScanner.scanAndSyncInbox(context)
                         CockpitWidget().updateAll(context)
-                        Toast.makeText(context, "Synced $count ENBD alerts & updated widget!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Synced $count ENBD alerts", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
 
-            MaterialTheme(colorScheme = darkColorScheme()) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = Color(0xFF0F0F11)
-                ) {
-                    val vaults by dao.getAllVaults().collectAsState(initial = emptyList())
-                    val snapshot by dao.getSnapshot().collectAsState(initial = null)
-                    val recentTxns by dao.getRecentTransactions().collectAsState(initial = emptyList())
-
-                    val today = LocalDate.now()
-                    val payday = if (today.dayOfMonth < 22) today.withDayOfMonth(22) else today.plusMonths(1).withDayOfMonth(22)
-                    val daysUntilPayday = ChronoUnit.DAYS.between(today, payday).coerceAtLeast(1)
-
-                    val checkingCash = snapshot?.liveDebitBalance ?: 6296.29
-                    val currentStatementDue = snapshot?.statementDue ?: 3620.45
-                    val dueDateLabel = snapshot?.statementDueDate ?: "19 Nov"
-                    val unbilledVal = snapshot?.unbilledSpend ?: 4925.36
-                    val ccTags = snapshot?.ccSubTagsSummary ?: ""
-                    val totalCcOwed = snapshot?.creditTotalOwed ?: (currentStatementDue + unbilledVal)
-                    val avlLimit = snapshot?.creditAvailableLimit ?: (42000.00 - totalCcOwed)
-                    val cycleLabel = snapshot?.cycleLabel ?: "Cycle: 22 Oct – 21 Nov"
-                    val cyclePool = snapshot?.cycleStartingPool ?: 0.0
-
-                    val usableCashToday = (checkingCash - currentStatementDue).coerceAtLeast(0.0)
-                    val safeDaily = (usableCashToday / daysUntilPayday.toDouble()).coerceAtLeast(0.0)
-
-                    var simulatedModeOverride by remember { mutableStateOf<Pair<String, String>?>(null) }
-                    val liveMode = DynamicAllocationEngine.getLiveModeBadge(usableCashToday)
-                    val activeMode = simulatedModeOverride ?: liveMode
-
-                    val modeAccentColor = when (activeMode.first) {
-                        "APEX WEALTH MODE" -> Color(0xFFFFD60A)
-                        "BRIDGE VELOCITY" -> Color(0xFF388AF6)
-                        "CRUISING ALTITUDE" -> Color(0xFF5AC8FA)
-                        "STEADY RUNWAY" -> Color(0xFF00E676)
-                        else -> Color(0xFFFF9F0A)
-                    }
-
-                    val expectedSalary = 9750.00
-                    val autoLoanEmi = 1594.00
-                    val nextMonthCcCommitment = if (unbilledVal > 1000.0) 147.00 else unbilledVal
-                    val projectedNextMonthBudget = (usableCashToday + expectedSalary - autoLoanEmi - nextMonthCcCommitment).coerceAtLeast(0.0)
-
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 16.dp),
-                        contentPadding = PaddingValues(vertical = 20.dp)
+            ProvideCockpitColors(palette) {
+                MaterialTheme(colorScheme = if (isDark) CockpitDarkColorScheme else CockpitLightColorScheme) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = palette.background
                     ) {
-                        item {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column {
-                                    Text(
-                                        text = "FINANCIAL COCKPIT",
-                                        fontSize = 22.sp,
-                                        fontWeight = FontWeight.Black,
-                                        letterSpacing = 1.sp,
-                                        color = Color(0xFF00E676)
-                                    )
-                                    Text(
-                                        text = cycleLabel,
-                                        fontSize = 11.sp,
-                                        color = Color(0xFF8E8E93)
-                                    )
-                                }
+                        val vaults by dao.getAllVaults().collectAsState(initial = emptyList())
+                        val snapshot by dao.getSnapshot().collectAsState(initial = null)
+                        val recentTxns by dao.getRecentTransactions().collectAsState(initial = emptyList())
 
-                                FilledTonalButton(
-                                    onClick = {
-                                        simulatedModeOverride = null
-                                        if (hasSmsPermission) {
-                                            coroutineScope.launch {
-                                                val count = SmsHistoryScanner.scanAndSyncInbox(context)
-                                                CockpitWidget().updateAll(context)
-                                                Toast.makeText(context, "Synced $count ENBD alerts", Toast.LENGTH_SHORT).show()
-                                            }
-                                        } else {
-                                            permissionLauncher.launch(arrayOf(Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS))
-                                        }
-                                    },
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = ButtonDefaults.filledTonalButtonColors(
-                                        containerColor = Color(0xFF1C1C1E),
-                                        contentColor = Color(0xFF00E676)
-                                    ),
-                                    modifier = Modifier.border(1.dp, Color(0xFF2C2C2E), RoundedCornerShape(12.dp))
-                                ) {
-                                    Text("⚡ Scan SMS", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
+                        val today = LocalDate.now()
+                        val payday = if (today.dayOfMonth < 22) today.withDayOfMonth(22) else today.plusMonths(1).withDayOfMonth(22)
+                        val daysUntilPayday = ChronoUnit.DAYS.between(today, payday).coerceAtLeast(1)
 
-                            Spacer(modifier = Modifier.height(10.dp))
+                        val checkingCash = snapshot?.liveDebitBalance ?: 2737.93
+                        val currentStatementDue = snapshot?.statementDue ?: 0.0
+                        val dueDateLabel = snapshot?.statementDueDate ?: "19 Nov"
+                        val unbilledVal = snapshot?.unbilledSpend ?: 4987.45
+                        val ccTags = snapshot?.ccSubTagsSummary ?: ""
+                        val totalCcOwed = snapshot?.creditTotalOwed ?: (currentStatementDue + unbilledVal)
+                        val ccLimit = snapshot?.creditCardLimit ?: 42000.0
+                        val avlLimit = snapshot?.creditAvailableLimit ?: (ccLimit - totalCcOwed)
+                        val cycleLabel = snapshot?.cycleLabel ?: "22 Oct – 21 Nov"
+                        val cyclePool = snapshot?.cycleStartingPool ?: 6380.0
 
-                            // Live Cockpit Mode Status Pill
-                            Surface(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp),
-                                color = modeAccentColor.copy(alpha = 0.10f),
-                                border = BorderStroke(1.dp, modeAccentColor.copy(alpha = 0.35f))
-                            ) {
+                        val usableCashToday = (checkingCash - currentStatementDue).coerceAtLeast(0.0)
+                        val safeDaily = (usableCashToday / daysUntilPayday.toDouble()).coerceAtLeast(0.0)
+
+                        var simulatedModeOverride by remember { mutableStateOf<Pair<String, String>?>(null) }
+                        val liveMode = DynamicAllocationEngine.getLiveModeBadge(usableCashToday)
+                        val activeMode = simulatedModeOverride ?: liveMode
+
+                        val expectedSalary = 9750.00
+                        val autoLoanEmi = 1594.00
+                        val nextMonthCcCommitment = if (unbilledVal > 1000.0) 147.00 else unbilledVal
+                        val projectedNextMonthBudget = (usableCashToday + expectedSalary - autoLoanEmi - nextMonthCcCommitment).coerceAtLeast(0.0)
+
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 18.dp),
+                            contentPadding = PaddingValues(top = 20.dp, bottom = 32.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            // 1. Minimalist Top Bar (Title + Theme Toggle + Sync)
+                            item {
                                 Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 9.dp),
+                                    modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column {
+                                        Text(
+                                            text = "Cockpit",
+                                            fontSize = 26.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = (-0.5).sp,
+                                            color = palette.textPrimary
+                                        )
+                                        Text(
+                                            text = cycleLabel,
+                                            fontSize = 12.sp,
+                                            color = palette.textSecondary
+                                        )
+                                    }
+
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Theme Cycle Pill (Auto -> Light -> Dark)
+                                        Surface(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .clickable {
+                                                    val next = when (themeMode) {
+                                                        "SYSTEM" -> "LIGHT"
+                                                        "LIGHT" -> "DARK"
+                                                        else -> "SYSTEM"
+                                                    }
+                                                    themeMode = next
+                                                    prefs.edit().putString("theme_mode", next).apply()
+                                                },
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = palette.surface,
+                                            border = BorderStroke(1.dp, palette.border)
+                                        ) {
+                                            val modeLabel = when (themeMode) {
+                                                "LIGHT" -> "☀ Light"
+                                                "DARK" -> "☾ Dark"
+                                                else -> "◐ Auto"
+                                            }
+                                            Text(
+                                                text = modeLabel,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = palette.textPrimary,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)
+                                            )
+                                        }
+
+                                        // Sync Button
+                                        Surface(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .clickable {
+                                                    simulatedModeOverride = null
+                                                    if (hasSmsPermission) {
+                                                        coroutineScope.launch {
+                                                            val count = SmsHistoryScanner.scanAndSyncInbox(context)
+                                                            CockpitWidget().updateAll(context)
+                                                            Toast.makeText(context, "Synced $count alerts", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    } else {
+                                                        permissionLauncher.launch(
+                                                            arrayOf(Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS)
+                                                        )
+                                                    }
+                                                },
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = palette.primaryAccent
+                                        ) {
+                                            Text(
+                                                text = "↻ Sync",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White,
+                                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 2. Signature Royal Violet Gradient Hero Card
+                            item {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(24.dp))
+                                        .background(palette.heroGradient)
+                                        .padding(22.dp)
+                                ) {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "TRUE USABLE CASH",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                letterSpacing = 1.sp,
+                                                color = Color.White.copy(alpha = 0.78f)
+                                            )
+                                            Surface(
+                                                shape = RoundedCornerShape(20.dp),
+                                                color = Color.White.copy(alpha = 0.16f)
+                                            ) {
+                                                Text(
+                                                    text = activeMode.first,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    letterSpacing = 0.6.sp,
+                                                    color = Color.White,
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(10.dp))
+
+                                        Text(
+                                            text = "AED ${String.format("%,.2f", usableCashToday)}",
+                                            fontSize = 36.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = (-1).sp,
+                                            color = Color.White
+                                        )
+
+                                        Spacer(modifier = Modifier.height(4.dp))
+
+                                        Text(
+                                            text = if (currentStatementDue <= 0.01) {
+                                                "Checking AED ${String.format("%,.2f", checkingCash)} • CC Bill Settled"
+                                            } else {
+                                                "Checking AED ${String.format("%,.2f", checkingCash)} − Due AED ${String.format("%,.2f", currentStatementDue)}"
+                                            },
+                                            fontSize = 12.sp,
+                                            color = Color.White.copy(alpha = 0.75f)
+                                        )
+
+                                        Spacer(modifier = Modifier.height(18.dp))
                                         Box(
                                             modifier = Modifier
-                                                .size(8.dp)
-                                                .background(modeAccentColor, CircleShape)
+                                                .fillMaxWidth()
+                                                .height(1.dp)
+                                                .background(Color.White.copy(alpha = 0.16f))
                                         )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "MODE: ${activeMode.first}",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Black,
-                                            letterSpacing = 0.8.sp,
-                                            color = modeAccentColor
-                                        )
-                                    }
-                                    Text(
-                                        text = activeMode.second,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = Color(0xFFD1D1D6)
-                                    )
-                                }
-                            }
+                                        Spacer(modifier = Modifier.height(16.dp))
 
-                            Spacer(modifier = Modifier.height(14.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column {
+                                                Text(
+                                                    text = "Safe Daily Pace",
+                                                    fontSize = 11.sp,
+                                                    color = Color.White.copy(alpha = 0.75f)
+                                                )
+                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Text(
+                                                    text = "AED ${String.format("%.0f", safeDaily)} / day",
+                                                    fontSize = 19.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = GoldTop
+                                                )
+                                            }
 
-                            // 1. True Usable Cash Card
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(20.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF161618)),
-                                border = BorderStroke(1.dp, Color(0xFF242426))
-                            ) {
-                                Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
-                                    Text(
-                                        text = if (currentStatementDue <= 0.01) "TRUE USABLE CASH (CC BILL SETTLED)" else "TRUE USABLE CASH (NET OF $dueDateLabel CC BILL)",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        letterSpacing = 1.sp,
-                                        color = Color(0xFF8E8E93)
-                                    )
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Text(
-                                        text = "AED ${String.format("%,.2f", usableCashToday)}",
-                                        fontSize = 32.sp,
-                                        fontWeight = FontWeight.Black,
-                                        color = Color(0xFF00E676)
-                                    )
-                                    Text(
-                                        text = "Checking AED ${String.format("%,.2f", checkingCash)} − Statement Due AED ${String.format("%,.2f", currentStatementDue)}",
-                                        fontSize = 11.sp,
-                                        color = Color(0xFF8E8E93)
-                                    )
-
-                                    Spacer(modifier = Modifier.height(14.dp))
-                                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF242426)))
-                                    Spacer(modifier = Modifier.height(14.dp))
-
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Column {
-                                            Text("Safe Daily Spend", fontSize = 11.sp, color = Color(0xFF8E8E93))
-                                            Text("AED ${String.format("%.0f", safeDaily)} / day", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00E676))
-                                        }
-                                        Column(horizontalAlignment = Alignment.End) {
-                                            Text("Runway Until Payday", fontSize = 11.sp, color = Color(0xFF8E8E93))
-                                            Text("$daysUntilPayday days left (22nd)", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                                            Column(horizontalAlignment = Alignment.End) {
+                                                Text(
+                                                    text = "Runway to 22nd",
+                                                    fontSize = 11.sp,
+                                                    color = Color.White.copy(alpha = 0.75f)
+                                                )
+                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Text(
+                                                    text = "$daysUntilPayday days left",
+                                                    fontSize = 16.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = Color.White
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(14.dp))
-
-                            // 2. Credit Card Liability + CC Sub-Tag Breakdown
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(20.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF161618)),
-                                border = BorderStroke(1.dp, Color(0xFF382323))
-                            ) {
-                                Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text(
-                                            text = "SKYWARDS SIGNATURE (CARD 3445)",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            letterSpacing = 1.sp,
-                                            color = Color(0xFFFF453A)
-                                        )
-                                        Text(
-                                            text = "AVL LIMIT: AED ${String.format("%,.0f", avlLimit)}",
-                                            fontSize = 10.sp,
-                                            color = Color(0xFF8E8E93)
-                                        )
-                                    }
-
-                                    Spacer(modifier = Modifier.height(10.dp))
-
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Column {
-                                            Text(
-                                                text = if (currentStatementDue <= 0.01) "AED 0.00 ✓" else "AED ${String.format("%,.2f", currentStatementDue)}",
-                                                fontSize = 20.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (currentStatementDue <= 0.01) Color(0xFF00E676) else Color.White
-                                            )
-                                            Text(
-                                                text = if (currentStatementDue <= 0.01) "Statement Paid" else "Billed Due ($dueDateLabel)",
-                                                fontSize = 11.sp,
-                                                color = if (currentStatementDue <= 0.01) Color(0xFF00E676) else Color(0xFFFF9F0A)
-                                            )
-                                        }
-
-                                        Column(horizontalAlignment = Alignment.End) {
-                                            Text(
-                                                text = "AED ${String.format("%,.2f", unbilledVal)}",
-                                                fontSize = 20.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color(0xFFFF453A)
-                                            )
-                                            Text("Unbilled (EPP Est: ~147/mo)", fontSize = 11.sp, color = Color(0xFF8E8E93))
-                                        }
-                                    }
-
-                                    if (ccTags.isNotBlank()) {
-                                        Spacer(modifier = Modifier.height(10.dp))
-                                        Text(
-                                            text = "Cycle Card Spend: $ccTags",
-                                            fontSize = 11.sp,
-                                            color = Color(0xFFFF9F0A),
-                                            lineHeight = 15.sp
-                                        )
-                                    }
-
-                                    Spacer(modifier = Modifier.height(14.dp))
-                                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF242426)))
-                                    Spacer(modifier = Modifier.height(12.dp))
-
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Column {
-                                            Text("Post-Payday Liquid Forecast", fontSize = 11.sp, color = Color(0xFF8E8E93))
-                                            Text("AED ${String.format("%,.0f", projectedNextMonthBudget)}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF388AF6))
-                                        }
-                                        Column(horizontalAlignment = Alignment.End) {
-                                            Text("Total Card Debt (42k − Avl)", fontSize = 11.sp, color = Color(0xFF8E8E93))
-                                            Text("AED ${String.format("%,.2f", totalCcOwed)}", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFD1D1D6))
-                                        }
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            // 3. Reconciled Cash Vault Donut Card
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(20.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF161618)),
-                                border = BorderStroke(1.dp, Color(0xFF242426))
-                            ) {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth().padding(20.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text(
-                                        text = "USABLE CASH VAULT ALLOCATION",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        letterSpacing = 1.5.sp,
-                                        color = Color(0xFF8E8E93)
-                                    )
-                                    if (cyclePool > 0.0) {
-                                        Text(
-                                            text = "Cycle Cash Pool: AED ${String.format("%,.0f", cyclePool)}",
-                                            fontSize = 11.sp,
-                                            color = Color(0xFF636366)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    DonutChart(vaults = vaults, modifier = Modifier.size(180.dp))
-                                    Spacer(modifier = Modifier.height(18.dp))
-                                    DonutLegend(vaults = vaults)
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Button(
-                                    onClick = {
-                                        coroutineScope.launch {
-                                            val alloc = DynamicAllocationEngine.calculateDynamicSplit(9750.0)
-                                            simulatedModeOverride = alloc.allocationMode to alloc.modeSubtitle
-                                            dao.updateVaultBalances(listOf(
-                                                VaultBalanceEntity("RENT", alloc.rentVault, 0.0, alloc.rentVault),
-                                                VaultBalanceEntity("FIXED_OVERHEAD", alloc.fixedOverheadVault, 0.0, alloc.fixedOverheadVault),
-                                                VaultBalanceEntity("SUSTENANCE_FLEET", alloc.sustenanceFleetVault, 0.0, alloc.sustenanceFleetVault),
-                                                VaultBalanceEntity("DISCRETIONARY", alloc.discretionaryVault, 0.0, alloc.discretionaryVault),
-                                                VaultBalanceEntity("TRAVEL", alloc.travelVault, 0.0, alloc.travelVault),
-                                                VaultBalanceEntity("WEALTH_SURPLUS", alloc.wealthSurplusVault, 0.0, alloc.wealthSurplusVault)
-                                            ))
-                                        }
-                                    },
-                                    modifier = Modifier.weight(1f).height(44.dp),
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFF242426),
-                                        contentColor = Color.White
-                                    )
-                                ) {
-                                    Text("Sim: 9,750 Payday", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                }
-
-                                Button(
-                                    onClick = {
-                                        coroutineScope.launch {
-                                            val alloc = DynamicAllocationEngine.calculateDynamicSplit(17000.0)
-                                            simulatedModeOverride = alloc.allocationMode to alloc.modeSubtitle
-                                            dao.updateVaultBalances(listOf(
-                                                VaultBalanceEntity("RENT", alloc.rentVault, 0.0, alloc.rentVault),
-                                                VaultBalanceEntity("FIXED_OVERHEAD", alloc.fixedOverheadVault, 0.0, alloc.fixedOverheadVault),
-                                                VaultBalanceEntity("SUSTENANCE_FLEET", alloc.sustenanceFleetVault, 0.0, alloc.sustenanceFleetVault),
-                                                VaultBalanceEntity("DISCRETIONARY", alloc.discretionaryVault, 0.0, alloc.discretionaryVault),
-                                                VaultBalanceEntity("TRAVEL", alloc.travelVault, 0.0, alloc.travelVault),
-                                                VaultBalanceEntity("WEALTH_SURPLUS", alloc.wealthSurplusVault, 0.0, alloc.wealthSurplusVault)
-                                            ))
-                                        }
-                                    },
-                                    modifier = Modifier.weight(1f).height(44.dp),
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFF00E676),
-                                        contentColor = Color(0xFF0A0A0B)
-                                    )
-                                ) {
-                                    Text("Sim: 17,000 Raise", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(20.dp))
-
-                            Text(
-                                text = "CASH VAULT LEDGER & #SUBTAGS",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.sp,
-                                color = Color(0xFF8E8E93)
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                        }
-
-                        items(vaults) { vault ->
-                            VaultItemCard(vault)
-                            Spacer(modifier = Modifier.height(10.dp))
-                        }
-
-                        if (recentTxns.isNotEmpty()) {
+                            // 3. Skywards Signature Card (Clean Minimalist Surface + Amber Accent)
                             item {
-                                Spacer(modifier = Modifier.height(14.dp))
-                                Text(
-                                    text = "RECENT PARSED ENBD ALERTS (TAP TO INSPECT)",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 1.sp,
-                                    color = Color(0xFF8E8E93)
-                                )
-                                Spacer(modifier = Modifier.height(10.dp))
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(22.dp),
+                                    color = palette.surface,
+                                    border = BorderStroke(1.dp, palette.border)
+                                ) {
+                                    Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(8.dp)
+                                                        .background(AmberTop, CircleShape)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    text = "Skywards Signature • 3445",
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = palette.textPrimary
+                                                )
+                                            }
+                                            Text(
+                                                text = "Avl AED ${String.format("%,.0f", avlLimit)}",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = palette.textSecondary
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(16.dp))
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column {
+                                                Text(
+                                                    text = if (currentStatementDue <= 0.01) "Statement ($dueDateLabel)" else "Billed Due ($dueDateLabel)",
+                                                    fontSize = 11.sp,
+                                                    color = palette.textSecondary
+                                                )
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text(
+                                                    text = if (currentStatementDue <= 0.01) "Paid ✓" else "AED ${String.format("%,.2f", currentStatementDue)}",
+                                                    fontSize = 21.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (currentStatementDue <= 0.01) palette.positiveGreen else palette.amberAccent
+                                                )
+                                            }
+
+                                            Column(horizontalAlignment = Alignment.End) {
+                                                Text(
+                                                    text = "Unbilled Balance",
+                                                    fontSize = 11.sp,
+                                                    color = palette.textSecondary
+                                                )
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text(
+                                                    text = "AED ${String.format("%,.2f", unbilledVal)}",
+                                                    fontSize = 21.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = palette.textPrimary
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(12.dp))
+
+                                        // Subtle Credit Utilization Bar
+                                        val ccProgress = (totalCcOwed / ccLimit).toFloat().coerceIn(0f, 1f)
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(6.dp)
+                                                .clip(CircleShape)
+                                                .background(palette.surfaceMuted)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth(ccProgress)
+                                                    .fillMaxHeight()
+                                                    .clip(CircleShape)
+                                                    .background(palette.amberGradient)
+                                            )
+                                        }
+
+                                        if (ccTags.isNotBlank()) {
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            Text(
+                                                text = ccTags,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = palette.amberAccent,
+                                                lineHeight = 16.sp
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(14.dp))
+                                        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(palette.border))
+                                        Spacer(modifier = Modifier.height(14.dp))
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column {
+                                                Text("22nd Liquid Forecast", fontSize = 11.sp, color = palette.textSecondary)
+                                                Text(
+                                                    text = "AED ${String.format("%,.0f", projectedNextMonthBudget)}",
+                                                    fontSize = 16.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = palette.primaryAccent
+                                                )
+                                            }
+                                            Column(horizontalAlignment = Alignment.End) {
+                                                Text("Total Card Debt", fontSize = 11.sp, color = palette.textSecondary)
+                                                Text(
+                                                    text = "AED ${String.format("%,.2f", totalCcOwed)}",
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = palette.textPrimary
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                            items(recentTxns) { txn ->
-                                TransactionRowCard(txn)
-                                Spacer(modifier = Modifier.height(8.dp))
+
+                            // 4. Vault Allocation Donut + Payday Simulator Pills
+                            item {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(22.dp),
+                                    color = palette.surface,
+                                    border = BorderStroke(1.dp, palette.border)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth().padding(20.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Cash Vault Allocation",
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = palette.textPrimary
+                                            )
+                                            if (cyclePool > 0.0) {
+                                                Text(
+                                                    text = "Pool AED ${String.format("%,.0f", cyclePool)}",
+                                                    fontSize = 11.sp,
+                                                    color = palette.textSecondary
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                        DonutChart(vaults = vaults, modifier = Modifier.size(176.dp))
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                        DonutLegend(vaults = vaults)
+
+                                        Spacer(modifier = Modifier.height(18.dp))
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Surface(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .clickable {
+                                                        coroutineScope.launch {
+                                                            val alloc = DynamicAllocationEngine.calculateDynamicSplit(9750.0)
+                                                            simulatedModeOverride = alloc.allocationMode to alloc.modeSubtitle
+                                                            dao.updateVaultBalances(listOf(
+                                                                VaultBalanceEntity("RENT", alloc.rentVault, 0.0, alloc.rentVault),
+                                                                VaultBalanceEntity("FIXED_OVERHEAD", alloc.fixedOverheadVault, 0.0, alloc.fixedOverheadVault),
+                                                                VaultBalanceEntity("SUSTENANCE_FLEET", alloc.sustenanceFleetVault, 0.0, alloc.sustenanceFleetVault),
+                                                                VaultBalanceEntity("DISCRETIONARY", alloc.discretionaryVault, 0.0, alloc.discretionaryVault),
+                                                                VaultBalanceEntity("TRAVEL", alloc.travelVault, 0.0, alloc.travelVault),
+                                                                VaultBalanceEntity("WEALTH_SURPLUS", alloc.wealthSurplusVault, 0.0, alloc.wealthSurplusVault)
+                                                            ))
+                                                        }
+                                                    },
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = palette.surfaceMuted
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier.padding(vertical = 11.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = "Sim 9,750 Payday",
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = palette.textPrimary
+                                                    )
+                                                }
+                                            }
+
+                                            Surface(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .clickable {
+                                                        coroutineScope.launch {
+                                                            val alloc = DynamicAllocationEngine.calculateDynamicSplit(17000.0)
+                                                            simulatedModeOverride = alloc.allocationMode to alloc.modeSubtitle
+                                                            dao.updateVaultBalances(listOf(
+                                                                VaultBalanceEntity("RENT", alloc.rentVault, 0.0, alloc.rentVault),
+                                                                VaultBalanceEntity("FIXED_OVERHEAD", alloc.fixedOverheadVault, 0.0, alloc.fixedOverheadVault),
+                                                                VaultBalanceEntity("SUSTENANCE_FLEET", alloc.sustenanceFleetVault, 0.0, alloc.sustenanceFleetVault),
+                                                                VaultBalanceEntity("DISCRETIONARY", alloc.discretionaryVault, 0.0, alloc.discretionaryVault),
+                                                                VaultBalanceEntity("TRAVEL", alloc.travelVault, 0.0, alloc.travelVault),
+                                                                VaultBalanceEntity("WEALTH_SURPLUS", alloc.wealthSurplusVault, 0.0, alloc.wealthSurplusVault)
+                                                            ))
+                                                        }
+                                                    },
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = palette.primaryAccent
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier.padding(vertical = 11.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = "Sim 17,000 Raise",
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color.White
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 5. Vault Ledger Header
+                            item {
+                                Text(
+                                    text = "Vault Ledger",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = palette.textPrimary,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+
+                            items(vaults) { vault ->
+                                VaultItemCard(vault)
+                            }
+
+                            // 6. Recent ENBD Activity
+                            if (recentTxns.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        text = "Recent ENBD Alerts",
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = palette.textPrimary,
+                                        modifier = Modifier.padding(top = 6.dp)
+                                    )
+                                }
+                                items(recentTxns) { txn ->
+                                    TransactionRowCard(txn)
+                                }
                             }
                         }
                     }
@@ -468,33 +624,32 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-fun getVaultColor(key: String): Color {
-    return when (key) {
-        "RENT" -> Color(0xFF388AF6)
-        "FIXED_OVERHEAD" -> Color(0xFFFF9500)
-        "SUSTENANCE_FLEET" -> Color(0xFF30D158)
-        "DISCRETIONARY" -> Color(0xFFAF52DE)
-        "TRAVEL" -> Color(0xFF5AC8FA)
-        "WEALTH_SURPLUS" -> Color(0xFFFFD60A)
-        else -> Color(0xFF8E8E93)
-    }
+private fun formatVaultLabel(key: String): String = when (key) {
+    "SUSTENANCE_FLEET" -> "Sustenance & Fleet"
+    "FIXED_OVERHEAD" -> "Fixed Overhead"
+    "DISCRETIONARY" -> "Discretionary"
+    "WEALTH_SURPLUS" -> "Wealth Surplus"
+    "TRAVEL" -> "Travel"
+    "RENT" -> "Rent"
+    else -> key.replace("_", " ")
 }
 
 @Composable
 fun DonutChart(vaults: List<VaultBalanceEntity>, modifier: Modifier = Modifier) {
+    val palette = LocalCockpitColors.current
     val positiveVaults = vaults.filter { it.currentRemaining > 0.0 }
     val totalPositive = positiveVaults.sumOf { it.currentRemaining }.toFloat()
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val strokeWidth = 22.dp.toPx()
+            val strokeWidth = 20.dp.toPx()
             val diameter = size.minDimension - strokeWidth
             val topLeft = Offset((size.width - diameter) / 2, (size.height - diameter) / 2)
             val arcSize = Size(diameter, diameter)
 
             if (totalPositive <= 0f) {
                 drawArc(
-                    color = Color(0xFF2C2C2E),
+                    color = palette.surfaceMuted,
                     startAngle = 0f,
                     sweepAngle = 360f,
                     useCenter = false,
@@ -508,9 +663,9 @@ fun DonutChart(vaults: List<VaultBalanceEntity>, modifier: Modifier = Modifier) 
                     val sweep = (vault.currentRemaining.toFloat() / totalPositive) * 360f
                     if (sweep > 0f) {
                         drawArc(
-                            color = getVaultColor(vault.vaultKey),
+                            color = getVaultSolidColor(vault.vaultKey, palette.isDark),
                             startAngle = currentAngle,
-                            sweepAngle = (sweep - 2f).coerceAtLeast(1f),
+                            sweepAngle = (sweep - 3f).coerceAtLeast(1f),
                             useCenter = false,
                             topLeft = topLeft,
                             size = arcSize,
@@ -525,16 +680,14 @@ fun DonutChart(vaults: List<VaultBalanceEntity>, modifier: Modifier = Modifier) 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = "AED ${String.format("%,.2f", totalPositive)}",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Black,
-                color = Color.White
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                color = palette.textPrimary
             )
             Text(
-                text = "USABLE CASH",
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF8E8E93),
-                letterSpacing = 1.sp
+                text = "Usable Cash",
+                fontSize = 11.sp,
+                color = palette.textSecondary
             )
         }
     }
@@ -542,23 +695,24 @@ fun DonutChart(vaults: List<VaultBalanceEntity>, modifier: Modifier = Modifier) 
 
 @Composable
 fun DonutLegend(vaults: List<VaultBalanceEntity>) {
+    val palette = LocalCockpitColors.current
     val chunked = vaults.chunked(3)
-    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         chunked.forEach { row ->
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 row.forEach { vault ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
                                 .size(8.dp)
-                                .background(getVaultColor(vault.vaultKey), CircleShape)
+                                .background(getVaultSolidColor(vault.vaultKey, palette.isDark), CircleShape)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = vault.vaultKey.replace("_", " "),
-                            fontSize = 10.sp,
+                            text = formatVaultLabel(vault.vaultKey),
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
-                            color = Color(0xFFD1D1D6)
+                            color = palette.textSecondary
                         )
                     }
                 }
@@ -569,6 +723,9 @@ fun DonutLegend(vaults: List<VaultBalanceEntity>) {
 
 @Composable
 fun VaultItemCard(vault: VaultBalanceEntity) {
+    val palette = LocalCockpitColors.current
+    val gradPair = getVaultPalettePair(vault.vaultKey)
+    val solidAccent = getVaultSolidColor(vault.vaultKey, palette.isDark)
     val progress = if (vault.allocatedAmount > 0) (vault.currentRemaining / vault.allocatedAmount).toFloat() else 0f
     val animatedProgress by animateFloatAsState(
         targetValue = progress.coerceIn(0f, 1f),
@@ -576,13 +733,13 @@ fun VaultItemCard(vault: VaultBalanceEntity) {
         label = "vault_progress"
     )
 
-    Card(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF161618)),
-        border = BorderStroke(1.dp, Color(0xFF242426))
+        shape = RoundedCornerShape(18.dp),
+        color = palette.surface,
+        border = BorderStroke(1.dp, palette.border)
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(18.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -592,51 +749,62 @@ fun VaultItemCard(vault: VaultBalanceEntity) {
                     Box(
                         modifier = Modifier
                             .size(10.dp)
-                            .background(getVaultColor(vault.vaultKey), CircleShape)
+                            .background(Brush.linearGradient(listOf(gradPair.first, gradPair.second)), CircleShape)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = vault.vaultKey.replace("_", " "),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        text = formatVaultLabel(vault.vaultKey),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = palette.textPrimary
                     )
                 }
 
                 Text(
                     text = "AED ${String.format("%,.2f", vault.currentRemaining)}",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Black,
-                    color = if (vault.currentRemaining > 0) Color.White else Color(0xFF8E8E93)
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (vault.currentRemaining > 0) palette.textPrimary else palette.textSecondary
                 )
             }
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Gradient Progress Pill
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(7.dp)
+                    .clip(CircleShape)
+                    .background(palette.surfaceMuted)
+            ) {
+                if (animatedProgress > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(animatedProgress)
+                            .fillMaxHeight()
+                            .clip(CircleShape)
+                            .background(Brush.horizontalGradient(listOf(gradPair.first, gradPair.second)))
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(10.dp))
-
-            LinearProgressIndicator(
-                progress = { animatedProgress },
-                modifier = Modifier.fillMaxWidth().height(6.dp),
-                color = getVaultColor(vault.vaultKey),
-                trackColor = Color(0xFF242426),
-                strokeCap = StrokeCap.Round
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = "Cash Target: AED ${String.format("%.0f", vault.allocatedAmount)}  •  Cash Spent: AED ${String.format("%.0f", vault.spentAmount)}",
+                    text = "Target AED ${String.format("%.0f", vault.allocatedAmount)}  •  Spent AED ${String.format("%.0f", vault.spentAmount)}",
                     fontSize = 11.sp,
-                    color = Color(0xFF8E8E93)
+                    color = palette.textSecondary
                 )
                 Text(
                     text = "${(progress * 100).toInt()}% left",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFFD1D1D6)
+                    color = palette.textPrimary
                 )
             }
 
@@ -646,7 +814,7 @@ fun VaultItemCard(vault: VaultBalanceEntity) {
                     text = vault.topSubTagsSummary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
-                    color = getVaultColor(vault.vaultKey)
+                    color = solidAccent
                 )
             }
         }
@@ -655,20 +823,22 @@ fun VaultItemCard(vault: VaultBalanceEntity) {
 
 @Composable
 fun TransactionRowCard(txn: TransactionEntity) {
+    val palette = LocalCockpitColors.current
     var expanded by remember { mutableStateOf(false) }
     val formatter = remember { DateTimeFormatter.ofPattern("dd MMM, HH:mm").withZone(ZoneId.systemDefault()) }
     val formattedDate = formatter.format(Instant.ofEpochMilli(txn.timestamp))
-    val tagColor = if (txn.isInternalTransfer) Color(0xFF00E676) else getVaultColor(txn.deducedVault)
+    val tagColor = if (txn.isInternalTransfer) palette.positiveGreen else getVaultSolidColor(txn.deducedVault, palette.isDark)
 
-    Card(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
             .clickable { expanded = !expanded },
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF161618)),
-        border = BorderStroke(1.dp, Color(0xFF242426))
+        shape = RoundedCornerShape(16.dp),
+        color = palette.surface,
+        border = BorderStroke(1.dp, palette.border)
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -677,28 +847,28 @@ fun TransactionRowCard(txn: TransactionEntity) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = txn.merchant,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = palette.textPrimary
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(5.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "${if (txn.isCreditCard) "CC 3445" else "DEBIT 8691"} • $formattedDate",
+                            text = "${if (txn.isCreditCard) "Card 3445" else "Checking"} • $formattedDate",
                             fontSize = 11.sp,
-                            color = if (txn.isCreditCard) Color(0xFFFF9F0A) else Color(0xFF388AF6)
+                            color = palette.textSecondary
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Surface(
                             shape = RoundedCornerShape(6.dp),
-                            color = tagColor.copy(alpha = 0.16f)
+                            color = tagColor.copy(alpha = 0.14f)
                         ) {
                             Text(
                                 text = txn.subTag,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = tagColor,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                             )
                         }
                     }
@@ -707,19 +877,19 @@ fun TransactionRowCard(txn: TransactionEntity) {
                     text = "AED ${String.format("%,.2f", txn.amount)}",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (txn.isInternalTransfer) Color(0xFF00E676) else Color.White
+                    color = if (txn.isInternalTransfer) palette.positiveGreen else palette.textPrimary
                 )
             }
 
             if (expanded) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(palette.border))
                 Spacer(modifier = Modifier.height(10.dp))
-                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF242426)))
-                Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = txn.rawSms,
                     fontSize = 11.sp,
-                    color = Color(0xFF8E8E93),
-                    lineHeight = 15.sp
+                    color = palette.textSecondary,
+                    lineHeight = 16.sp
                 )
             }
         }
