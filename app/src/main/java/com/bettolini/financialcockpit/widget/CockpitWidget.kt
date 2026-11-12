@@ -73,13 +73,12 @@ private fun CockpitWidgetContent(snapshot: AccountSnapshotEntity?) {
             .background(ColorProvider(Color(0xFF121214)))
             .cornerRadius(18.dp)
             .padding(14.dp)
-            .clickable(actionStartActivity<MainActivity>()),
-        verticalAlignment = Alignment.Vertical.SpaceBetween
+            .clickable(actionStartActivity<MainActivity>())
     ) {
         // Top Row: Title + Refresh Button
         Row(
             modifier = GlanceModifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.Vertical.CenterVertically
         ) {
             Text(
                 text = "TRUE USABLE CASH",
@@ -109,10 +108,12 @@ private fun CockpitWidgetContent(snapshot: AccountSnapshotEntity?) {
             }
         }
 
+        Spacer(modifier = GlanceModifier.defaultWeight())
+
         // Center Row: Big Usable Cash + Safe Daily Pill
         Row(
             modifier = GlanceModifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Bottom
+            verticalAlignment = Alignment.Vertical.Bottom
         ) {
             Text(
                 text = "AED ${String.format("%,.0f", usableCash)}",
@@ -123,7 +124,7 @@ private fun CockpitWidgetContent(snapshot: AccountSnapshotEntity?) {
                 ),
                 modifier = GlanceModifier.defaultWeight()
             )
-            Column(horizontalAlignment = Alignment.End) {
+            Column(horizontalAlignment = Alignment.Horizontal.End) {
                 Text(
                     text = "AED ${String.format("%.0f", dailySafe)}/day",
                     style = TextStyle(
@@ -142,10 +143,12 @@ private fun CockpitWidgetContent(snapshot: AccountSnapshotEntity?) {
             }
         }
 
+        Spacer(modifier = GlanceModifier.defaultWeight())
+
         // Bottom Row: Billed CC Status + Unbilled
         Row(
             modifier = GlanceModifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.Vertical.CenterVertically
         ) {
             val billText = if (billedDue <= 0.01) "CC Bill: PAID ✓" else "CC Due: AED ${String.format("%,.0f", billedDue)}"
             val billColor = if (billedDue <= 0.01) Color(0xFF00E676) else Color(0xFFFF9F0A)
