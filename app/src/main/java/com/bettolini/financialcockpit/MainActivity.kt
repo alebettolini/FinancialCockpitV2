@@ -33,11 +33,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.glance.appwidget.updateAll
 import com.bettolini.financialcockpit.data.AppDatabase
 import com.bettolini.financialcockpit.data.SmsHistoryScanner
 import com.bettolini.financialcockpit.data.TransactionEntity
 import com.bettolini.financialcockpit.data.VaultBalanceEntity
 import com.bettolini.financialcockpit.domain.DynamicAllocationEngine
+import com.bettolini.financialcockpit.widget.CockpitWidget
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
@@ -66,7 +68,8 @@ class MainActivity : ComponentActivity() {
                 if (hasSmsPermission) {
                     coroutineScope.launch {
                         val count = SmsHistoryScanner.scanAndSyncInbox(context)
-                        Toast.makeText(context, "Synced $count ENBD transactions!", Toast.LENGTH_SHORT).show()
+                        CockpitWidget().updateAll(context)
+                        Toast.makeText(context, "Synced $count ENBD alerts & updated widget!", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -85,13 +88,14 @@ class MainActivity : ComponentActivity() {
                     val daysUntilPayday = ChronoUnit.DAYS.between(today, payday).coerceAtLeast(1)
 
                     // Core Accounting Math
-                    val checkingCash = snapshot?.liveDebitBalance ?: 6300.00
+                    val checkingCash = snapshot?.liveDebitBalance ?: 6296.29
                     val currentStatementDue = snapshot?.statementDue ?: 3620.45
                     val dueDateLabel = snapshot?.statementDueDate ?: "19 Nov"
-                    val unbilledVal = snapshot?.unbilledSpend ?: 4930.00
+                    val unbilledVal = snapshot?.unbilledSpend ?: 4894.16
                     val totalCcOwed = snapshot?.creditTotalOwed ?: (currentStatementDue + unbilledVal)
                     val avlLimit = snapshot?.creditAvailableLimit ?: (42000.00 - totalCcOwed)
-                    val modeLabel = snapshot?.allocationMode ?: "DEFCON 2: Debt Service & Commute"
+                    val cycleLabel = snapshot?.cycleLabel ?: "Cycle: 22 Oct – 21 Nov"
+                    val cyclePool = snapshot?.cycleStartingPool ?: 0.0
 
                     val usableCashToday = (checkingCash - currentStatementDue).coerceAtLeast(0.0)
                     val safeDaily = (usableCashToday / daysUntilPayday.toDouble()).coerceAtLeast(0.0)
@@ -101,6 +105,9 @@ class MainActivity : ComponentActivity() {
                     val autoLoanEmi = 1594.00
                     val nextMonthCcCommitment = if (unbilledVal > 1000.0) 147.00 else unbilledVal
                     val projectedNextMonthBudget = (usableCashToday + expectedSalary - autoLoanEmi - nextMonthCcCommitment).coerceAtLeast(0.0)
+
+                    // Cross-vault overage calculation
+                    val totalVaultOverage = vaults.filter { it.currentRemaining < 0.0 }.sumOf { -it.currentRemaining }
 
                     LazyColumn(
                         modifier = Modifier
@@ -124,7 +131,7 @@ class MainActivity : ComponentActivity() {
                                         color = Color(0xFF00E676)
                                     )
                                     Text(
-                                        text = modeLabel,
+                                        text = cycleLabel,
                                         fontSize = 11.sp,
                                         color = Color(0xFF8E8E93)
                                     )
@@ -135,7 +142,8 @@ class MainActivity : ComponentActivity() {
                                         if (hasSmsPermission) {
                                             coroutineScope.launch {
                                                 val count = SmsHistoryScanner.scanAndSyncInbox(context)
-                                                Toast.makeText(context, "Synced $count ENBD transactions", Toast.LENGTH_SHORT).show()
+                                                CockpitWidget().updateAll(context)
+                                                Toast.makeText(context, "Synced $count ENBD alerts", Toast.LENGTH_SHORT).show()
                                             }
                                         } else {
                                             permissionLauncher.launch(arrayOf(Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS))
@@ -163,7 +171,7 @@ class MainActivity : ComponentActivity() {
                             ) {
                                 Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
                                     Text(
-                                        text = "TRUE USABLE CASH (NET OF $dueDateLabel CC BILL)",
+                                        text = if (currentStatementDue <= 0.01) "TRUE USABLE CASH (CC BILL SETTLED)" else "TRUE USABLE CASH (NET OF $dueDateLabel CC BILL)",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         letterSpacing = 1.sp,
@@ -229,12 +237,16 @@ class MainActivity : ComponentActivity() {
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                         Column {
                                             Text(
-                                                text = "AED ${String.format("%,.2f", currentStatementDue)}",
+                                                text = if (currentStatementDue <= 0.01) "AED 0.00 ✓" else "AED ${String.format("%,.2f", currentStatementDue)}",
                                                 fontSize = 20.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = Color.White
+                                                color = if (currentStatementDue <= 0.01) Color(0xFF00E676) else Color.White
                                             )
-                                            Text("Billed Due ($dueDateLabel)", fontSize = 11.sp, color = Color(0xFFFF9F0A))
+                                            Text(
+                                                text = if (currentStatementDue <= 0.01) "Statement Paid" else "Billed Due ($dueDateLabel)",
+                                                fontSize = 11.sp,
+                                                color = if (currentStatementDue <= 0.01) Color(0xFF00E676) else Color(0xFFFF9F0A)
+                                            )
                                         }
 
                                         Column(horizontalAlignment = Alignment.End) {
@@ -267,7 +279,7 @@ class MainActivity : ComponentActivity() {
 
                             Spacer(modifier = Modifier.height(16.dp))
 
-                            // 3. Dynamic Donut Chart Card
+                            // 3. Payday-Anchored Donut Chart Card
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(20.dp),
@@ -279,16 +291,40 @@ class MainActivity : ComponentActivity() {
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Text(
-                                        text = "USABLE CASH VAULT ALLOCATION",
+                                        text = "PAYDAY-ANCHORED VAULT LEDGER",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         letterSpacing = 1.5.sp,
                                         color = Color(0xFF8E8E93)
                                     )
-                                    Spacer(modifier = Modifier.height(18.dp))
+                                    if (cyclePool > 0.0) {
+                                        Text(
+                                            text = "Cycle Starting Pool: AED ${String.format("%,.0f", cyclePool)}",
+                                            fontSize = 11.sp,
+                                            color = Color(0xFF636366)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(16.dp))
                                     DonutChart(vaults = vaults, modifier = Modifier.size(180.dp))
                                     Spacer(modifier = Modifier.height(18.dp))
                                     DonutLegend(vaults = vaults)
+
+                                    if (totalVaultOverage > 0.0) {
+                                        Spacer(modifier = Modifier.height(14.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = Color(0xFF2C1618),
+                                            border = BorderStroke(1.dp, Color(0xFF5C2326))
+                                        ) {
+                                            Text(
+                                                text = "⚠ Vault Overage: AED ${String.format("%,.2f", totalVaultOverage)} cannibalized from other vaults",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color(0xFFFF6961),
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
 
@@ -304,12 +340,12 @@ class MainActivity : ComponentActivity() {
                                         coroutineScope.launch {
                                             val alloc = DynamicAllocationEngine.calculateDynamicSplit(9750.0)
                                             dao.updateVaultBalances(listOf(
-                                                VaultBalanceEntity("RENT", alloc.rentVault, alloc.rentVault),
-                                                VaultBalanceEntity("FIXED_OVERHEAD", alloc.fixedOverheadVault, alloc.fixedOverheadVault),
-                                                VaultBalanceEntity("SUSTENANCE_FLEET", alloc.sustenanceFleetVault, alloc.sustenanceFleetVault),
-                                                VaultBalanceEntity("DISCRETIONARY", alloc.discretionaryVault, alloc.discretionaryVault),
-                                                VaultBalanceEntity("TRAVEL", alloc.travelVault, alloc.travelVault),
-                                                VaultBalanceEntity("WEALTH_SURPLUS", alloc.wealthSurplusVault, alloc.wealthSurplusVault)
+                                                VaultBalanceEntity("RENT", alloc.rentVault, 0.0, alloc.rentVault),
+                                                VaultBalanceEntity("FIXED_OVERHEAD", alloc.fixedOverheadVault, 0.0, alloc.fixedOverheadVault),
+                                                VaultBalanceEntity("SUSTENANCE_FLEET", alloc.sustenanceFleetVault, 0.0, alloc.sustenanceFleetVault),
+                                                VaultBalanceEntity("DISCRETIONARY", alloc.discretionaryVault, 0.0, alloc.discretionaryVault),
+                                                VaultBalanceEntity("TRAVEL", alloc.travelVault, 0.0, alloc.travelVault),
+                                                VaultBalanceEntity("WEALTH_SURPLUS", alloc.wealthSurplusVault, 0.0, alloc.wealthSurplusVault)
                                             ))
                                         }
                                     },
@@ -320,7 +356,7 @@ class MainActivity : ComponentActivity() {
                                         contentColor = Color.White
                                     )
                                 ) {
-                                    Text("Sim: 9,750 Salary", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    Text("Sim: 9,750 Payday", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                                 }
 
                                 Button(
@@ -328,12 +364,12 @@ class MainActivity : ComponentActivity() {
                                         coroutineScope.launch {
                                             val alloc = DynamicAllocationEngine.calculateDynamicSplit(17000.0)
                                             dao.updateVaultBalances(listOf(
-                                                VaultBalanceEntity("RENT", alloc.rentVault, alloc.rentVault),
-                                                VaultBalanceEntity("FIXED_OVERHEAD", alloc.fixedOverheadVault, alloc.fixedOverheadVault),
-                                                VaultBalanceEntity("SUSTENANCE_FLEET", alloc.sustenanceFleetVault, alloc.sustenanceFleetVault),
-                                                VaultBalanceEntity("DISCRETIONARY", alloc.discretionaryVault, alloc.discretionaryVault),
-                                                VaultBalanceEntity("TRAVEL", alloc.travelVault, alloc.travelVault),
-                                                VaultBalanceEntity("WEALTH_SURPLUS", alloc.wealthSurplusVault, alloc.wealthSurplusVault)
+                                                VaultBalanceEntity("RENT", alloc.rentVault, 0.0, alloc.rentVault),
+                                                VaultBalanceEntity("FIXED_OVERHEAD", alloc.fixedOverheadVault, 0.0, alloc.fixedOverheadVault),
+                                                VaultBalanceEntity("SUSTENANCE_FLEET", alloc.sustenanceFleetVault, 0.0, alloc.sustenanceFleetVault),
+                                                VaultBalanceEntity("DISCRETIONARY", alloc.discretionaryVault, 0.0, alloc.discretionaryVault),
+                                                VaultBalanceEntity("TRAVEL", alloc.travelVault, 0.0, alloc.travelVault),
+                                                VaultBalanceEntity("WEALTH_SURPLUS", alloc.wealthSurplusVault, 0.0, alloc.wealthSurplusVault)
                                             ))
                                         }
                                     },
@@ -351,7 +387,7 @@ class MainActivity : ComponentActivity() {
                             Spacer(modifier = Modifier.height(20.dp))
 
                             Text(
-                                text = "VAULT BREAKDOWN",
+                                text = "VAULT LEDGER & #SUBTAGS",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 1.sp,
@@ -403,7 +439,9 @@ fun getVaultColor(key: String): Color {
 
 @Composable
 fun DonutChart(vaults: List<VaultBalanceEntity>, modifier: Modifier = Modifier) {
-    val totalRemaining = vaults.sumOf { it.currentRemaining }.toFloat()
+    val positiveVaults = vaults.filter { it.currentRemaining > 0.0 }
+    val totalPositive = positiveVaults.sumOf { it.currentRemaining }.toFloat()
+    val netVaultTotal = vaults.sumOf { it.currentRemaining }.toFloat()
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -412,7 +450,7 @@ fun DonutChart(vaults: List<VaultBalanceEntity>, modifier: Modifier = Modifier) 
             val topLeft = Offset((size.width - diameter) / 2, (size.height - diameter) / 2)
             val arcSize = Size(diameter, diameter)
 
-            if (totalRemaining <= 0f) {
+            if (totalPositive <= 0f) {
                 drawArc(
                     color = Color(0xFF2C2C2E),
                     startAngle = 0f,
@@ -424,8 +462,8 @@ fun DonutChart(vaults: List<VaultBalanceEntity>, modifier: Modifier = Modifier) 
                 )
             } else {
                 var currentAngle = -90f
-                vaults.forEach { vault ->
-                    val sweep = (vault.currentRemaining.toFloat() / totalRemaining) * 360f
+                positiveVaults.forEach { vault ->
+                    val sweep = (vault.currentRemaining.toFloat() / totalPositive) * 360f
                     if (sweep > 0f) {
                         drawArc(
                             color = getVaultColor(vault.vaultKey),
@@ -444,13 +482,13 @@ fun DonutChart(vaults: List<VaultBalanceEntity>, modifier: Modifier = Modifier) 
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = "AED ${String.format("%.0f", totalRemaining)}",
+                text = "AED ${String.format("%.0f", netVaultTotal)}",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Black,
                 color = Color.White
             )
             Text(
-                text = "ALLOCATED",
+                text = "NET VAULTS",
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFF8E8E93),
@@ -489,6 +527,7 @@ fun DonutLegend(vaults: List<VaultBalanceEntity>) {
 
 @Composable
 fun VaultItemCard(vault: VaultBalanceEntity) {
+    val isOverspent = vault.currentRemaining < 0.0
     val progress = if (vault.allocatedAmount > 0) (vault.currentRemaining / vault.allocatedAmount).toFloat() else 0f
     val animatedProgress by animateFloatAsState(
         targetValue = progress.coerceIn(0f, 1f),
@@ -499,8 +538,8 @@ fun VaultItemCard(vault: VaultBalanceEntity) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF161618)),
-        border = BorderStroke(1.dp, Color(0xFF242426))
+        colors = CardDefaults.cardColors(containerColor = if (isOverspent) Color(0xFF1E1416) else Color(0xFF161618)),
+        border = BorderStroke(1.dp, if (isOverspent) Color(0xFF4A1E22) else Color(0xFF242426))
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Row(
@@ -524,10 +563,10 @@ fun VaultItemCard(vault: VaultBalanceEntity) {
                 }
 
                 Text(
-                    text = "AED ${String.format("%.2f", vault.currentRemaining)}",
+                    text = if (isOverspent) "-AED ${String.format("%,.2f", -vault.currentRemaining)}" else "AED ${String.format("%,.2f", vault.currentRemaining)}",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Black,
-                    color = if (vault.currentRemaining > 0) Color.White else Color(0xFFFF453A)
+                    color = if (isOverspent) Color(0xFFFF453A) else if (vault.currentRemaining > 0) Color.White else Color(0xFF8E8E93)
                 )
             }
 
@@ -536,7 +575,7 @@ fun VaultItemCard(vault: VaultBalanceEntity) {
             LinearProgressIndicator(
                 progress = { animatedProgress },
                 modifier = Modifier.fillMaxWidth().height(6.dp),
-                color = getVaultColor(vault.vaultKey),
+                color = if (isOverspent) Color(0xFFFF453A) else getVaultColor(vault.vaultKey),
                 trackColor = Color(0xFF242426),
                 strokeCap = StrokeCap.Round
             )
@@ -548,15 +587,25 @@ fun VaultItemCard(vault: VaultBalanceEntity) {
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = "Target: AED ${String.format("%.0f", vault.allocatedAmount)}",
+                    text = "Cycle Target: AED ${String.format("%.0f", vault.allocatedAmount)}  •  Spent: AED ${String.format("%.0f", vault.spentAmount)}",
                     fontSize = 11.sp,
                     color = Color(0xFF8E8E93)
                 )
                 Text(
-                    text = "${(progress * 100).toInt()}% available",
+                    text = if (isOverspent) "OVER" else "${(progress * 100).toInt()}% left",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFFD1D1D6)
+                    color = if (isOverspent) Color(0xFFFF453A) else Color(0xFFD1D1D6)
+                )
+            }
+
+            if (vault.topSubTagsSummary.isNotBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = vault.topSubTagsSummary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = getVaultColor(vault.vaultKey)
                 )
             }
         }
@@ -567,6 +616,7 @@ fun VaultItemCard(vault: VaultBalanceEntity) {
 fun TransactionRowCard(txn: TransactionEntity) {
     val formatter = remember { DateTimeFormatter.ofPattern("dd MMM, HH:mm").withZone(ZoneId.systemDefault()) }
     val formattedDate = formatter.format(Instant.ofEpochMilli(txn.timestamp))
+    val tagColor = if (txn.isInternalTransfer) Color(0xFF00E676) else getVaultColor(txn.deducedVault)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -586,18 +636,33 @@ fun TransactionRowCard(txn: TransactionEntity) {
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "${if (txn.isCreditCard) "CC 3445" else "DEBIT 8691"} • $formattedDate",
-                    fontSize = 11.sp,
-                    color = if (txn.isCreditCard) Color(0xFFFF9F0A) else Color(0xFF388AF6)
-                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${if (txn.isCreditCard) "CC 3445" else "DEBIT 8691"} • $formattedDate",
+                        fontSize = 11.sp,
+                        color = if (txn.isCreditCard) Color(0xFFFF9F0A) else Color(0xFF388AF6)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = tagColor.copy(alpha = 0.16f)
+                    ) {
+                        Text(
+                            text = txn.subTag,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = tagColor,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
             }
             Text(
                 text = "AED ${String.format("%,.2f", txn.amount)}",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = if (txn.isInternalTransfer) Color(0xFF00E676) else Color.White
             )
         }
     }

@@ -12,8 +12,8 @@ android {
         applicationId = "com.bettolini.financialcockpit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "2.0"
+        versionCode = 2
+        versionName = "2.1"
     }
 
     buildTypes {
@@ -54,4 +54,8 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.9.0")
+
+    // Jetpack Glance Home Screen Widget
+    implementation("androidx.glance:glance-appwidget:1.1.0")
+    implementation("androidx.glance:glance-material3:1.1.0")
 }

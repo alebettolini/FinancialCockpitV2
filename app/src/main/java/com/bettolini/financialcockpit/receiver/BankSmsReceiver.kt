@@ -4,7 +4,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.provider.Telephony
+import androidx.glance.appwidget.updateAll
 import com.bettolini.financialcockpit.data.SmsHistoryScanner
+import com.bettolini.financialcockpit.widget.CockpitWidget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -16,8 +18,10 @@ class BankSmsReceiver : BroadcastReceiver() {
             for (sms in messages) {
                 val sender = sms.displayOriginatingAddress ?: ""
                 if (sender.contains("ENBD", true) || sender.contains("EmiratesNBD", true)) {
+                    val appContext = context.applicationContext
                     CoroutineScope(Dispatchers.IO).launch {
-                        SmsHistoryScanner.scanAndSyncInbox(context.applicationContext)
+                        SmsHistoryScanner.scanAndSyncInbox(appContext)
+                        CockpitWidget().updateAll(appContext)
                     }
                 }
             }

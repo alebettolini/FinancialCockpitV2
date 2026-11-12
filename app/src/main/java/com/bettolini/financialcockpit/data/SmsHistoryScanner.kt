@@ -3,14 +3,32 @@ package com.bettolini.financialcockpit.data
 import android.content.Context
 import android.provider.Telephony
 import com.bettolini.financialcockpit.domain.DynamicAllocationEngine
+import com.bettolini.financialcockpit.domain.MerchantClassifier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 object SmsHistoryScanner {
+
+    fun getCurrentCycleStart(today: LocalDate = LocalDate.now()): LocalDate {
+        return if (today.dayOfMonth >= 22) {
+            today.withDayOfMonth(22)
+        } else {
+            today.minusMonths(1).withDayOfMonth(22)
+        }
+    }
 
     suspend fun scanAndSyncInbox(context: Context): Int = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
         val dao = AppDatabase.getInstance(context).financeDao()
+        val zone = ZoneId.systemDefault()
+        val today = LocalDate.now(zone)
+        val cycleStartDate = getCurrentCycleStart(today)
+        val cycleStartMillis = cycleStartDate.atStartOfDay(zone).toInstant().toEpochMilli()
+        val cycleLabel = "Cycle: ${cycleStartDate.format(DateTimeFormatter.ofPattern("dd MMM"))} – ${cycleStartDate.plusMonths(1).minusDays(1).format(DateTimeFormatter.ofPattern("dd MMM"))}"
 
         val cursor = resolver.query(
             Telephony.Sms.Inbox.CONTENT_URI,
@@ -20,7 +38,7 @@ object SmsHistoryScanner {
             "${Telephony.Sms.DATE} ASC"
         ) ?: return@withContext 0
 
-        var detectedDebitBalance = 6300.00
+        var detectedDebitBalance = 6296.29
         var detectedCreditAvlLimit = 33485.39
         var lastCreditLimitTimestamp = 0L
         var detectedStatementDue = 3620.45
@@ -50,7 +68,7 @@ object SmsHistoryScanner {
             RegexOption.IGNORE_CASE
         )
         val ccPaymentRegex = Regex(
-            """Payment of\s+AED\s*([\d,]+\.?\d*)\s+received""",
+            """Payment of\s+AED\s*([\d,]+\.?\d*)\s+(?:has been\s+)?received""",
             RegexOption.IGNORE_CASE
         )
 
@@ -65,9 +83,18 @@ object SmsHistoryScanner {
                 val date = c.getLong(dateIndex)
 
                 if (address.contains("ENBD", true) || address.contains("EmiratesNBD", true)) {
-                    val isCredit = body.contains("Credit Card", true) ||
+                    // Explicit account discrimination so checking debits for CC payment don't get misread as CC alerts
+                    val isDebitAccountMsg = body.contains("A/C", true) ||
+                            body.contains("Account", true) ||
+                            body.contains("8691", true) ||
+                            body.contains("Avl Balance", true) ||
+                            body.contains("Available Balance", true)
+
+                    val isCredit = !isDebitAccountMsg && (
+                            body.contains("Credit Card", true) ||
                             body.contains("3445", true) ||
                             body.contains("Limit", true)
+                    )
 
                     // 1. Live Checking Account Balance
                     val debitBalMatch = debitBalanceRegex.find(body)
@@ -104,43 +131,39 @@ object SmsHistoryScanner {
                         detectedStatementDue = (detectedStatementDue - paid).coerceAtLeast(0.0)
                     }
 
-                    // 5. Card / Account Spend Transaction
+                    // 5. Spend & Internal Transfer Tracking
                     val isPaymentReceipt = body.contains("received towards", true) || body.contains("credited", true)
+                    val isCcBillTransfer = body.contains("Credit Card payment", true) || body.contains("Card Payment", true)
                     val purchaseMatch = purchaseRegex.find(body)
+
                     if (purchaseMatch != null && !isPaymentReceipt) {
                         val amount = purchaseMatch.groupValues[1].replace(",", "").toDoubleOrNull() ?: 0.0
-                        val rawMerchant = merchantRegex.find(body)?.groupValues?.get(1)?.trim()
-                        val merchant = if (!rawMerchant.isNullOrBlank()) rawMerchant else if (isCredit) "Card Purchase" else "Account Debit"
+                        val rawMerchant = merchantRegex.find(body)?.groupValues?.get(1)?.trim() ?: ""
 
-                        // Fallback deduction if a CC swipe SMS arrived after the last explicit Avl Limit SMS without stating a new limit
                         if (isCredit && parsedLimitInMsg == null && date > lastCreditLimitTimestamp) {
                             detectedCreditAvlLimit = (detectedCreditAvlLimit - amount).coerceAtLeast(0.0)
                         }
 
-                        val targetVault = when {
-                            merchant.contains("ENOC", true) || merchant.contains("EPPCO", true) ||
-                            merchant.contains("ADNOC", true) || merchant.contains("EMARAT", true) -> "SUSTENANCE_FLEET"
-
-                            merchant.contains("INSTASHOP", true) || merchant.contains("GRANDIOSE", true) ||
-                            merchant.contains("LULU", true) || merchant.contains("CARREFOUR", true) -> "SUSTENANCE_FLEET"
-
-                            merchant.contains("ZYARA", true) || merchant.contains("ORTO", true) ||
-                            merchant.contains("FLAT12", true) || merchant.contains("PACHA", true) ||
-                            merchant.contains("GENTS SALON", true) || merchant.contains("1987", true) -> "DISCRETIONARY"
-
-                            merchant.contains("PL-AC", true) || merchant.contains("LOAN", true) ||
-                            merchant.contains("DEWA", true) || merchant.contains("FITNESS", true) -> "FIXED_OVERHEAD"
-
-                            else -> "DISCRETIONARY"
+                        val classification = if (isCcBillTransfer) {
+                            com.bettolini.financialcockpit.domain.ClassificationResult(
+                                vaultKey = "INTERNAL_TRANSFER",
+                                subTag = "#CC Bill Paid",
+                                cleanMerchant = "ENBD Card 3445 Repayment"
+                            )
+                        } else {
+                            MerchantClassifier.classify(rawMerchant, body)
                         }
 
                         parsedTransactions.add(
                             TransactionEntity(
                                 timestamp = date,
                                 amount = amount,
-                                merchant = merchant,
+                                merchant = classification.cleanMerchant,
                                 isCreditCard = isCredit,
-                                deducedVault = targetVault,
+                                isInternalTransfer = isCcBillTransfer,
+                                isCurrentCycle = date >= cycleStartMillis,
+                                deducedVault = classification.vaultKey,
+                                subTag = classification.subTag,
                                 rawSms = body
                             )
                         )
@@ -151,9 +174,46 @@ object SmsHistoryScanner {
 
         val creditTotalOwed = (creditLimit - detectedCreditAvlLimit).coerceAtLeast(0.0)
         val unbilledSpend = (creditTotalOwed - detectedStatementDue).coerceAtLeast(0.0)
-
         val trueUsableCash = (detectedDebitBalance - detectedStatementDue).coerceAtLeast(0.0)
-        val allocation = DynamicAllocationEngine.calculateDynamicSplit(trueUsableCash)
+
+        // Payday-Anchored Vault Ledger:
+        // Reconstruct cycle starting usable pool = True Usable Cash Today + Total Cycle Vault Spend
+        val cycleSpendTxns = parsedTransactions.filter { it.isCurrentCycle && !it.isInternalTransfer }
+        val totalCycleSpend = cycleSpendTxns.sumOf { it.amount }
+        val reconstructedCycleStartPool = trueUsableCash + totalCycleSpend
+
+        val baselineAlloc = DynamicAllocationEngine.calculateDynamicSplit(reconstructedCycleStartPool)
+        val vaultTargets = mapOf(
+            "RENT" to baselineAlloc.rentVault,
+            "FIXED_OVERHEAD" to baselineAlloc.fixedOverheadVault,
+            "SUSTENANCE_FLEET" to baselineAlloc.sustenanceFleetVault,
+            "DISCRETIONARY" to baselineAlloc.discretionaryVault,
+            "TRAVEL" to baselineAlloc.travelVault,
+            "WEALTH_SURPLUS" to baselineAlloc.wealthSurplusVault
+        )
+
+        val updatedVaults = vaultTargets.map { (key, target) ->
+            val vaultTxns = cycleSpendTxns.filter { it.deducedVault == key }
+            val spent = vaultTxns.sumOf { it.amount }
+            val remaining = target - spent // Can go negative if overspent in that specific vault
+
+            // Build top sub-tag summary string for this vault
+            val tagSummary = vaultTxns
+                .groupBy { it.subTag }
+                .mapValues { entry -> entry.value.sumOf { it.amount } }
+                .entries
+                .sortedByDescending { it.value }
+                .take(3)
+                .joinToString("  •  ") { "${it.key}: AED ${String.format("%.0f", it.value)}" }
+
+            VaultBalanceEntity(
+                vaultKey = key,
+                allocatedAmount = target,
+                spentAmount = spent,
+                currentRemaining = remaining,
+                topSubTagsSummary = tagSummary
+            )
+        }
 
         dao.updateSnapshot(
             AccountSnapshotEntity(
@@ -165,21 +225,13 @@ object SmsHistoryScanner {
                 statementDue = detectedStatementDue,
                 statementDueDate = detectedDueDate,
                 unbilledSpend = unbilledSpend,
-                allocationMode = allocation.allocationMode
+                cycleStartingPool = reconstructedCycleStartPool,
+                cycleLabel = cycleLabel,
+                allocationMode = baselineAlloc.allocationMode
             )
         )
 
-        dao.updateVaultBalances(
-            listOf(
-                VaultBalanceEntity("RENT", allocation.rentVault, allocation.rentVault),
-                VaultBalanceEntity("FIXED_OVERHEAD", allocation.fixedOverheadVault, allocation.fixedOverheadVault),
-                VaultBalanceEntity("SUSTENANCE_FLEET", allocation.sustenanceFleetVault, allocation.sustenanceFleetVault),
-                VaultBalanceEntity("DISCRETIONARY", allocation.discretionaryVault, allocation.discretionaryVault),
-                VaultBalanceEntity("TRAVEL", allocation.travelVault, allocation.travelVault),
-                VaultBalanceEntity("WEALTH_SURPLUS", allocation.wealthSurplusVault, allocation.wealthSurplusVault)
-            )
-        )
-
+        dao.updateVaultBalances(updatedVaults)
         dao.clearTransactions()
         dao.insertTransactions(parsedTransactions)
 
