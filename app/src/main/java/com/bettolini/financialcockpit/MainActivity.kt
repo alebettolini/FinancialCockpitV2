@@ -56,6 +56,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -378,19 +379,25 @@ class MainActivity : ComponentActivity() {
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Column {
-                                                    Text(
-                                                        text = "Cockpit",
-                                                        fontSize = 24.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        letterSpacing = (-0.5).sp,
-                                                        color = palette.textPrimary
-                                                    )
-                                                    Text(
-                                                        text = cycleLabel,
-                                                        fontSize = 12.sp,
-                                                        color = palette.textSecondary
-                                                    )
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                ) {
+                                                    CadenceLogoMark(modifier = Modifier.size(36.dp))
+                                                    Column {
+                                                        Text(
+                                                            text = "Cadence",
+                                                            fontSize = 23.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            letterSpacing = (-0.5).sp,
+                                                            color = palette.textPrimary
+                                                        )
+                                                        Text(
+                                                            text = cycleLabel,
+                                                            fontSize = 11.sp,
+                                                            color = palette.textSecondary
+                                                        )
+                                                    }
                                                 }
 
                                                 Row(
@@ -1789,12 +1796,25 @@ fun SettingsBottomSheet(
                 .padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            Text(
-                text = "Cockpit Settings",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = palette.textPrimary
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                CadenceLogoMark(modifier = Modifier.size(38.dp))
+                Column {
+                    Text(
+                        text = "Cadence Settings",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = palette.textPrimary
+                    )
+                    Text(
+                        text = "Conscious cash. Compounding growth.",
+                        fontSize = 11.sp,
+                        color = palette.textSecondary
+                    )
+                }
+            }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
@@ -2660,6 +2680,100 @@ fun SettingsGearIcon(tint: Color, modifier: Modifier = Modifier) {
                 strokeWidth = stroke,
                 cap = StrokeCap.Round
             )
+        }
+    }
+}
+
+
+@Composable
+fun CadenceLogoMark(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(11.dp))
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(VioletTop, VioletBot)
+                )
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize().padding(5.dp)) {
+            val w = size.width
+            val h = size.height
+            val cx = w * 0.48f
+            val cy = h * 0.52f
+            val strokeW = w * 0.14f
+            val radius = w * 0.34f
+            val arcRectTopLeft = Offset(cx - radius, cy - radius)
+            val arcRectSize = Size(radius * 2f, radius * 2f)
+
+            // Segmented White 'C' Arcs
+            val segments = listOf(
+                184f to 82f,
+                272f to 36f,
+                136f to 42f,
+                92f to 28f,
+                26f to 62f
+            )
+            segments.forEach { (startAngle, sweepAngle) ->
+                drawArc(
+                    color = Color.White,
+                    startAngle = startAngle,
+                    sweepAngle = sweepAngle,
+                    useCenter = false,
+                    topLeft = arcRectTopLeft,
+                    size = arcRectSize,
+                    style = Stroke(width = strokeW, cap = StrokeCap.Butt)
+                )
+            }
+
+            // Stacked Gold Coin / Habit Bars inside lower-right of 'C'
+            val goldBrush = Brush.linearGradient(
+                colors = listOf(GoldTop, AmberBot),
+                start = Offset(w * 0.85f, h * 0.15f),
+                end = Offset(w * 0.2f, h * 0.85f)
+            )
+            val barW = w * 0.085f
+            val barH = h * 0.055f
+            val barGap = h * 0.022f
+            val baseY = h * 0.72f
+
+            // Left column (2 segments)
+            drawRect(
+                brush = goldBrush,
+                topLeft = Offset(w * 0.49f, baseY - barH),
+                size = Size(barW, barH)
+            )
+            drawRect(
+                brush = goldBrush,
+                topLeft = Offset(w * 0.49f, baseY - 2 * barH - barGap),
+                size = Size(barW, barH * 0.85f)
+            )
+
+            // Right column (4 segments)
+            for (i in 0 until 4) {
+                drawRect(
+                    brush = goldBrush,
+                    topLeft = Offset(w * 0.605f, baseY - (i + 1) * barH - i * barGap),
+                    size = Size(barW, if (i == 3) barH * 0.85f else barH)
+                )
+            }
+
+            // Rising Diagonal Amber-Gold Arrow breaking out top-right
+            val arrowPath = Path().apply {
+                moveTo(w * 0.22f, h * 0.81f)
+                lineTo(w * 0.32f, h * 0.87f)
+                lineTo(w * 0.59f, h * 0.46f)
+                lineTo(w * 0.80f, h * 0.30f)
+                lineTo(w * 0.85f, h * 0.35f)
+                lineTo(w * 0.91f, h * 0.14f)
+                lineTo(w * 0.69f, h * 0.20f)
+                lineTo(w * 0.74f, h * 0.25f)
+                lineTo(w * 0.38f, h * 0.53f)
+                lineTo(w * 0.47f, h * 0.48f)
+                close()
+            }
+            drawPath(path = arrowPath, brush = goldBrush)
         }
     }
 }

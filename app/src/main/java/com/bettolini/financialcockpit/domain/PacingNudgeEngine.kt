@@ -55,7 +55,7 @@ object PacingNudgeEngine {
             sendNotification(
                 context = appCtx,
                 id = 1001,
-                title = "Cockpit Mode: $activeMode",
+                title = "Cadence Mode: $activeMode",
                 body = "Usable cash reached AED ${String.format("%,.0f", usableCash)} • $modeSubtitle"
             )
         }
@@ -100,7 +100,7 @@ object PacingNudgeEngine {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Cockpit Pacing & Alerts",
+                "Cadence Pacing & Alerts",
                 NotificationManager.IMPORTANCE_DEFAULT
             )
             manager.createNotificationChannel(channel)

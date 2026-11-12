@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Segmented White 'C' Budget Arc -->
+    <!-- Top-Left Segment -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M 26.02,54.09 A 26.0,26.0 0 0,1 51.09,29.02 L 51.39,37.51 A 17.5,17.5 0 0,0 34.51,54.39 Z" />
+
+    <!-- Top-Right Cap Segment -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M 52.91,29.02 A 26.0,26.0 0 0,1 67.28,33.97 L 62.29,40.84 A 17.5,17.5 0 0,0 52.61,37.51 Z" />
+
+    <!-- Mid-Left Segment -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M 33.30,73.06 A 26.0,26.0 0 0,1 26.02,55.91 L 34.51,55.61 A 17.5,17.5 0 0,0 39.41,67.16 Z" />
+
+    <!-- Bottom-Center Wedge Segment -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M 51.09,80.98 A 26.0,26.0 0 0,1 39.00,77.52 L 43.25,70.16 A 17.5,17.5 0 0,0 51.39,72.49 Z" />
+
+    <!-- Bottom-Right Segment -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M 75.37,66.40 A 26.0,26.0 0 0,1 52.91,80.98 L 52.61,72.49 A 17.5,17.5 0 0,0 67.73,62.67 Z" />
+
+    <!-- Stacked Habit / Coin Bars (Left Column) -->
+    <path android:pathData="M 52.0,68.2 L 57.6,68.2 L 57.6,64.8 L 52.0,64.8 Z M 52.0,63.3 L 57.6,63.3 L 57.6,59.4 L 52.0,63.3 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="52"
+                android:startY="59"
+                android:endX="58"
+                android:endY="69"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFEC552" />
+                <item android:offset="1.0" android:color="#FFFF8601" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Stacked Habit / Coin Bars (Right Column) -->
+    <path android:pathData="M 59.4,68.2 L 65.2,68.2 L 65.2,64.8 L 59.4,64.8 Z M 59.4,63.3 L 65.2,63.3 L 65.2,59.9 L 59.4,59.9 Z M 59.4,58.4 L 65.2,58.4 L 65.2,55.0 L 59.4,55.0 Z M 59.4,53.5 L 65.2,53.5 L 65.2,48.6 L 59.4,53.5 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="59"
+                android:startY="48"
+                android:endX="66"
+                android:endY="69"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFEC552" />
+                <item android:offset="1.0" android:color="#FFFF8601" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Rising Amber-Gold Wealth Arrow -->
+    <path android:pathData="M 33.8,74.2 L 40.4,78.4 L 58.6,50.8 L 72.8,39.8 L 75.8,43.2 L 80.2,29.2 L 65.8,33.2 L 68.8,36.4 L 44.2,55.2 L 50.8,51.6 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="80"
+                android:startY="29"
+                android:endX="34"
+                android:endY="78"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFEC552" />
+                <item android:offset="0.55" android:color="#FFFAB301" />
+                <item android:offset="1.0" android:color="#FFFF8601" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>
