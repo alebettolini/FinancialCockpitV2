@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.abs
 
 object SmsHistoryScanner {
 
@@ -39,10 +40,15 @@ object SmsHistoryScanner {
         ) ?: return@withContext 0
 
         var detectedDebitBalance = 6296.29
+        var lastDebitBalanceTimestamp = 0L
+
         var detectedCreditAvlLimit = 33454.19
         var lastCreditLimitTimestamp = 0L
+
         var detectedStatementDue = 3620.45
+        var lastStatementTimestamp = 0L
         var detectedDueDate = "19 Nov"
+        var paymentAppliedThisCycle = false
 
         val creditLimit = 42000.00
         val parsedTransactions = mutableListOf<TransactionEntity>()
@@ -80,6 +86,10 @@ object SmsHistoryScanner {
             """AED\s*([\d,]+\.?\d*)\s+has been deducted from your account\s+([A-Z0-9]+)\s+towards payment of your Credit Card ending\s+(\d{4})""",
             RegexOption.IGNORE_CASE
         )
+        val ccCreditRefundRegex = Regex(
+            """(?:credited|refund|reversal).*?AED\s*([\d,]+\.?\d*)|AED\s*([\d,]+\.?\d*)\s+(?:has been\s+)?(?:credited|refunded)""",
+            RegexOption.IGNORE_CASE
+        )
 
         cursor.use { c ->
             val addressIndex = c.getColumnIndex(Telephony.Sms.ADDRESS)
@@ -92,54 +102,29 @@ object SmsHistoryScanner {
                 val date = c.getLong(dateIndex)
 
                 if (address.contains("ENBD", true) || address.contains("EmiratesNBD", true)) {
-                    val isDebitAccountMsg = body.contains("A/C", true) ||
-                            body.contains("Account", true) ||
-                            body.contains("8691", true) ||
-                            body.contains("Avl Balance", true) ||
-                            body.contains("Available Balance", true)
-
-                    val isCredit = !isDebitAccountMsg && (
-                            body.contains("Credit Card", true) ||
-                            body.contains("3445", true) ||
-                            body.contains("Limit", true)
-                    )
-
-                    val debitBalMatch = debitBalanceRegex.find(body)
-                    if (debitBalMatch != null && !isCredit) {
-                        debitBalMatch.groupValues[1].replace(",", "").toDoubleOrNull()?.let {
-                            detectedDebitBalance = it
-                        }
-                    }
-
-                    val creditLimMatch = creditLimitRegex.find(body)
-                    val parsedLimitInMsg = creditLimMatch?.groupValues?.get(1)?.replace(",", "")?.toDoubleOrNull()
-                    if (parsedLimitInMsg != null) {
-                        detectedCreditAvlLimit = parsedLimitInMsg
-                        lastCreditLimitTimestamp = date
-                    }
-
-                    val statementMatch = statementRegex.find(body)
-                    if (statementMatch != null && isCredit) {
-                        statementMatch.groupValues[1].replace(",", "").toDoubleOrNull()?.let {
-                            detectedStatementDue = it
-                        }
-                        val rawDate = statementMatch.groupValues.getOrNull(2)
-                        if (!rawDate.isNullOrBlank()) {
-                            detectedDueDate = rawDate
-                        }
-                    }
-
+                    // 1. Intercept Account-to-Credit-Card Settlement SMS first
                     val ccTransferMatch = ccTransferRegex.find(body)
                     if (ccTransferMatch != null) {
                         val paid = ccTransferMatch.groupValues[1].replace(",", "").toDoubleOrNull() ?: 0.0
                         val cardLast4 = ccTransferMatch.groupValues[3]
+
+                        // Deduct from checking if no newer SMS reported an explicit Avl Balance
+                        if (paid > 0.0 && date > lastDebitBalanceTimestamp) {
+                            detectedDebitBalance = (detectedDebitBalance - paid).coerceAtLeast(0.0)
+                        }
+
                         val alreadyCounted = recordedCcPayments.any {
-                            kotlin.math.abs(it.second - paid) < 0.01 && kotlin.math.abs(date - it.first) < 86_400_000L
+                            abs(it.second - paid) < 0.01 && abs(date - it.first) < 86_400_000L
                         }
                         if (!alreadyCounted && paid > 0.0) {
                             recordedCcPayments.add(date to paid)
                             detectedStatementDue = (detectedStatementDue - paid).coerceAtLeast(0.0)
+                            paymentAppliedThisCycle = true
+                            if (date > lastCreditLimitTimestamp) {
+                                detectedCreditAvlLimit = (detectedCreditAvlLimit + paid).coerceAtMost(creditLimit)
+                            }
                         }
+
                         parsedTransactions.add(
                             TransactionEntity(
                                 timestamp = date,
@@ -156,23 +141,93 @@ object SmsHistoryScanner {
                         continue
                     }
 
+                    val isDebitAccountMsg = body.contains("A/C", true) ||
+                            body.contains("Account", true) ||
+                            body.contains("8691", true) ||
+                            body.contains("Avl Balance", true) ||
+                            body.contains("Available Balance", true)
+
+                    val isCredit = !isDebitAccountMsg && (
+                            body.contains("Credit Card", true) ||
+                            body.contains("3445", true) ||
+                            body.contains("Limit", true)
+                    )
+
+                    // 2. Live Checking Account Balance
+                    val debitBalMatch = debitBalanceRegex.find(body)
+                    if (debitBalMatch != null && !isCredit) {
+                        debitBalMatch.groupValues[1].replace(",", "").toDoubleOrNull()?.let {
+                            detectedDebitBalance = it
+                            lastDebitBalanceTimestamp = date
+                        }
+                    }
+
+                    // 3. Credit Card Available Limit
+                    val creditLimMatch = creditLimitRegex.find(body)
+                    val parsedLimitInMsg = creditLimMatch?.groupValues?.get(1)?.replace(",", "")?.toDoubleOrNull()
+                    if (parsedLimitInMsg != null) {
+                        detectedCreditAvlLimit = parsedLimitInMsg
+                        lastCreditLimitTimestamp = date
+                    }
+
+                    // 4. Monthly Statement Generated
+                    val statementMatch = statementRegex.find(body)
+                    if (statementMatch != null && isCredit) {
+                        statementMatch.groupValues[1].replace(",", "").toDoubleOrNull()?.let {
+                            detectedStatementDue = it
+                            lastStatementTimestamp = date
+                            paymentAppliedThisCycle = false
+                        }
+                        val rawDate = statementMatch.groupValues.getOrNull(2)
+                        if (!rawDate.isNullOrBlank()) {
+                            detectedDueDate = rawDate
+                        }
+                    }
+
+                    // 5. Credit Card Payment Receipt SMS
                     val paymentMatch = ccPaymentRegex.find(body)
                     if (paymentMatch != null && isCredit) {
                         val paid = paymentMatch.groupValues[1].replace(",", "").toDoubleOrNull() ?: 0.0
                         val alreadyCounted = recordedCcPayments.any {
-                            kotlin.math.abs(it.second - paid) < 0.01 && kotlin.math.abs(date - it.first) < 86_400_000L
+                            abs(it.second - paid) < 0.01 && abs(date - it.first) < 86_400_000L
                         }
                         if (!alreadyCounted && paid > 0.0) {
                             recordedCcPayments.add(date to paid)
                             detectedStatementDue = (detectedStatementDue - paid).coerceAtLeast(0.0)
+                            paymentAppliedThisCycle = true
+                            if (parsedLimitInMsg == null && date > lastCreditLimitTimestamp) {
+                                detectedCreditAvlLimit = (detectedCreditAvlLimit + paid).coerceAtMost(creditLimit)
+                            }
+                        }
+                        continue
+                    }
+
+                    // 6. Post-Statement Credit Card Refunds / Credits (offsets Billed Due)
+                    val isPaymentReceipt = body.contains("received towards", true) || body.contains("Payment of", true)
+                    if (isCredit && !isPaymentReceipt) {
+                        val refundMatch = ccCreditRefundRegex.find(body)
+                        if (refundMatch != null) {
+                            val rawCredit = refundMatch.groupValues[1].ifBlank { refundMatch.groupValues[2] }
+                            val creditAmt = rawCredit.replace(",", "").toDoubleOrNull() ?: 0.0
+                            if (creditAmt > 0.0) {
+                                if (date >= lastStatementTimestamp) {
+                                    detectedStatementDue = (detectedStatementDue - creditAmt).coerceAtLeast(0.0)
+                                }
+                                if (parsedLimitInMsg == null && date > lastCreditLimitTimestamp) {
+                                    detectedCreditAvlLimit = (detectedCreditAvlLimit + creditAmt).coerceAtMost(creditLimit)
+                                }
+                            }
+                            continue
                         }
                     }
 
-                    val isPaymentReceipt = body.contains("received towards", true) || body.contains("credited", true)
-                    val isCcBillTransfer = body.contains("Credit Card payment", true) || body.contains("Card Payment", true) || body.contains("towards payment of your Credit Card", true)
+                    // 7. Standard Card / Account Spend Transaction
+                    val isCcBillTransfer = body.contains("Credit Card payment", true) ||
+                            body.contains("Card Payment", true) ||
+                            body.contains("towards payment of your Credit Card", true)
                     val purchaseMatch = purchaseRegex.find(body) ?: prefixDebitRegex.find(body)
 
-                    if (purchaseMatch != null && !isPaymentReceipt) {
+                    if (purchaseMatch != null && !isPaymentReceipt && !body.contains("credited", true)) {
                         val amount = purchaseMatch.groupValues[1].replace(",", "").toDoubleOrNull() ?: 0.0
                         val rawMerchant = merchantRegex.find(body)?.groupValues?.get(1)?.trim() ?: ""
 
@@ -208,16 +263,20 @@ object SmsHistoryScanner {
             }
         }
 
+        // Clear any sub-AED 100 residual statement dust (e.g., AED 62.09 pre-cutover refund) once a bill payment settles
+        if (paymentAppliedThisCycle && detectedStatementDue < 100.0) {
+            detectedStatementDue = 0.0
+        }
+
         val creditTotalOwed = (creditLimit - detectedCreditAvlLimit).coerceAtLeast(0.0)
         val unbilledSpend = (creditTotalOwed - detectedStatementDue).coerceAtLeast(0.0)
         val trueUsableCash = (detectedDebitBalance - detectedStatementDue).coerceAtLeast(0.0)
 
-        // Separate Cash (Checking 8691) spend from Credit Card (3445) spend in the current cycle
+        // Separate Cash (Checking) spend from Credit Card (3445) spend in the current cycle
         val cycleAllSpendTxns = parsedTransactions.filter { it.isCurrentCycle && !it.isInternalTransfer }
         val cycleCheckingTxns = cycleAllSpendTxns.filter { !it.isCreditCard }
         val cycleCreditTxns = cycleAllSpendTxns.filter { it.isCreditCard }
 
-        // Summarize Credit Card sub-tags for the Skywards Signature card
         val ccTagSummary = cycleCreditTxns
             .groupBy { it.subTag }
             .mapValues { entry -> entry.value.sumOf { it.amount } }
@@ -226,7 +285,6 @@ object SmsHistoryScanner {
             .take(4)
             .joinToString("  •  ") { "${it.key}: AED ${String.format("%.0f", it.value)}" }
 
-        // Cash Vault Pool = True Usable Cash Today + Cycle Checking Debits
         val cycleCheckingSpendTotal = cycleCheckingTxns.sumOf { it.amount }
         val reconstructedCycleStartPool = trueUsableCash + cycleCheckingSpendTotal
 
@@ -241,7 +299,6 @@ object SmsHistoryScanner {
             "WEALTH_SURPLUS" to baselineAlloc.wealthSurplusVault
         )
 
-        // Deduct checking cash spend from each vault; absorb any checking overage from the largest positive vault so Net Cash Vaults == True Usable Cash
         val rawRemaining = mutableMapOf<String, Double>()
         for (key in vaultKeys) {
             val target = vaultTargets[key] ?: 0.0
