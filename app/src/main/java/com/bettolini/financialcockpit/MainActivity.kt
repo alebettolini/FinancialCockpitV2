@@ -842,7 +842,7 @@ fun SettingsBottomSheet(themeMode: String, widgetStyle: String, isSimulationActi
                         val selected = themeMode == key
                         Surface(
                             modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { onSelectTheme(key) },
-                            shape = RoundedCornerShape(12.dp), color = if (selected) palette.heroBorderBrush else palette.surfaceMuted
+                            shape = RoundedCornerShape(12.dp), color = if (selected) palette.primaryAccent else palette.surfaceMuted
                         ) { Box(modifier = Modifier.padding(vertical = 11.dp), contentAlignment = Alignment.Center) { Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (selected) Color.White else palette.textPrimary) } }
                     }
                 }
@@ -854,7 +854,7 @@ fun SettingsBottomSheet(themeMode: String, widgetStyle: String, isSimulationActi
                         val selected = widgetStyle == key
                         Surface(
                             modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { onSelectWidgetStyle(key) },
-                            shape = RoundedCornerShape(12.dp), color = if (selected) palette.heroBorderBrush else palette.surfaceMuted
+                            shape = RoundedCornerShape(12.dp), color = if (selected) palette.primaryAccent else palette.surfaceMuted
                         ) { Box(modifier = Modifier.padding(vertical = 11.dp), contentAlignment = Alignment.Center) { Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (selected) Color.White else palette.textPrimary) } }
                     }
                 }
