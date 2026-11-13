@@ -379,24 +379,33 @@ class MainActivity : ComponentActivity() {
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                Surface(
+                                                    color = Color.Transparent,
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(12.dp))
+                                                        .clickable { showSettingsSheet = true }
+                                                        .padding(end = 8.dp, top = 4.dp, bottom = 4.dp)
                                                 ) {
-                                                    CadenceLogoMark(modifier = Modifier.size(36.dp))
-                                                    Column {
-                                                        Text(
-                                                            text = "Cadence",
-                                                            fontSize = 23.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            letterSpacing = (-0.5).sp,
-                                                            color = palette.textPrimary
-                                                        )
-                                                        Text(
-                                                            text = cycleLabel,
-                                                            fontSize = 11.sp,
-                                                            color = palette.textSecondary
-                                                        )
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                                    ) {
+                                                        CadenceLogoMark(modifier = Modifier.size(40.dp))
+                                                        Column(verticalArrangement = Arrangement.Center) {
+                                                            Text(
+                                                                text = "Cadence",
+                                                                fontSize = 22.sp,
+                                                                fontWeight = FontWeight.ExtraBold,
+                                                                letterSpacing = (-0.5).sp,
+                                                                color = palette.textPrimary
+                                                            )
+                                                            Text(
+                                                                text = cycleLabel,
+                                                                fontSize = 11.sp,
+                                                                fontWeight = FontWeight.Medium,
+                                                                color = palette.textSecondary
+                                                            )
+                                                        }
                                                     }
                                                 }
 
@@ -407,8 +416,8 @@ class MainActivity : ComponentActivity() {
                                                     Surface(
                                                         modifier = Modifier
                                                             .height(36.dp)
-                                                            .shadow(2.dp, RoundedCornerShape(12.dp), ambientColor = palette.shadowColor, spotColor = palette.shadowColor)
                                                             .clip(RoundedCornerShape(12.dp))
+                                                            .shadow(2.dp, RoundedCornerShape(12.dp), ambientColor = palette.shadowColor, spotColor = palette.shadowColor)
                                                             .clickable { showCycleHistorySheet = true },
                                                         shape = RoundedCornerShape(12.dp),
                                                         color = palette.surface,
@@ -430,8 +439,8 @@ class MainActivity : ComponentActivity() {
                                                     Surface(
                                                         modifier = Modifier
                                                             .size(36.dp)
-                                                            .shadow(2.dp, RoundedCornerShape(12.dp), ambientColor = palette.shadowColor, spotColor = palette.shadowColor)
                                                             .clip(RoundedCornerShape(12.dp))
+                                                            .shadow(2.dp, RoundedCornerShape(12.dp), ambientColor = palette.shadowColor, spotColor = palette.shadowColor)
                                                             .clickable { showSettingsSheet = true },
                                                         shape = RoundedCornerShape(12.dp),
                                                         color = palette.surface,
