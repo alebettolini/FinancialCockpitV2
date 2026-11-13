@@ -4,24 +4,20 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-
     <!-- Segmented White 'C' Budget Arc (Mathematically Centered at 54,54 with R=25) -->
     <path android:fillColor="#FFFFFFFF" android:pathData="M 77.49,45.45 A 25.0,25.0 0 0,1 72.58,70.73 L 66.26,65.04 A 16.5,16.5 0 0,0 69.50,48.36 Z" />
     <path android:fillColor="#FFFFFFFF" android:pathData="M 71.68,71.68 A 25.0,25.0 0 0,1 46.69,77.91 L 49.18,69.78 A 16.5,16.5 0 0,0 65.67,65.67 Z" />
     <path android:fillColor="#FFFFFFFF" android:pathData="M 45.45,77.49 A 25.0,25.0 0 0,1 29.24,57.48 L 37.66,56.30 A 16.5,16.5 0 0,0 48.36,69.50 Z" />
     <path android:fillColor="#FFFFFFFF" android:pathData="M 29.10,56.18 A 25.0,25.0 0 0,1 40.38,33.03 L 45.01,40.16 A 16.5,16.5 0 0,0 37.56,55.44 Z" />
     <path android:fillColor="#FFFFFFFF" android:pathData="M 41.50,32.35 A 25.0,25.0 0 0,1 67.25,32.80 L 62.74,40.01 A 16.5,16.5 0 0,0 45.75,39.71 Z" />
-
     <!-- Stacked Habit Bars (Left) -->
     <path android:fillColor="#FFF59E0B" android:pathData="M 46.0,66.0 L 51.0,66.0 L 51.0,60.0 L 46.0,60.0 Z" />
     <path android:fillColor="#FFFBBF24" android:pathData="M 46.0,58.0 L 51.0,58.0 L 51.0,50.0 L 46.0,50.0 Z" />
-
     <!-- Stacked Habit Bars (Right) -->
     <path android:fillColor="#FFD97706" android:pathData="M 53.0,66.0 L 58.0,66.0 L 58.0,61.0 L 53.0,61.0 Z" />
     <path android:fillColor="#FFF59E0B" android:pathData="M 53.0,59.0 L 58.0,59.0 L 58.0,53.0 L 53.0,53.0 Z" />
     <path android:fillColor="#FFFAB301" android:pathData="M 53.0,51.0 L 58.0,51.0 L 58.0,46.0 L 53.0,46.0 Z" />
     <path android:fillColor="#FFFEC552" android:pathData="M 53.0,44.0 L 58.0,44.0 L 58.0,38.0 L 53.0,38.0 Z" />
-
     <!-- Rising Arrow breaking out -->
     <path android:fillColor="#FFFAB301" android:pathData="M 33.0,63.0 L 37.0,68.0 L 63.0,43.0 L 73.0,33.0 L 76.0,36.0 L 81.0,24.0 L 69.0,28.0 L 72.0,31.0 L 41.0,57.0 Z" />
 </vector>
