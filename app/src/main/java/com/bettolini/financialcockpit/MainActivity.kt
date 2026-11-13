@@ -46,6 +46,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,12 +75,16 @@ import com.bettolini.financialcockpit.data.*
 import com.bettolini.financialcockpit.domain.DynamicAllocationEngine
 import com.bettolini.financialcockpit.ui.theme.*
 import com.bettolini.financialcockpit.widget.CockpitWidget
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+
+/** Translucent wash used for the frosted-glass card surfaces (real blur would also blur card content). */
+private const val GLASS_ALPHA = 0.75f
 
 private enum class ActiveScreen {
     DASHBOARD, DEBIT_ANALYTICS, CREDIT_ANALYTICS, VAULT_LEDGER, VAULT_DETAIL
@@ -160,6 +166,15 @@ class MainActivity : ComponentActivity() {
             val dashboardListState = rememberLazyListState()
             val vaultLedgerListState = rememberLazyListState()
             val cardsCarouselState = rememberPagerState(initialPage = 0, pageCount = { 2 })
+            var isRefreshing by remember { mutableStateOf(false) }
+            val pullRefreshState = rememberPullToRefreshState()
+
+            // Haptic tick whenever the cards carousel settles on a new page (skip the initial page)
+            LaunchedEffect(cardsCarouselState) {
+                snapshotFlow { cardsCarouselState.settledPage }.drop(1).collect {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                }
+            }
 
             var currentScreen by remember { mutableStateOf(ActiveScreen.DASHBOARD) }
             var isNavigatingBack by remember { mutableStateOf(false) }
@@ -264,6 +279,30 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                                 ActiveScreen.DASHBOARD -> {
+                                    PullToRefreshBox(
+                                        isRefreshing = isRefreshing,
+                                        onRefresh = {
+                                            simulatedModeOverride = null
+                                            if (hasSmsPermission) {
+                                                isRefreshing = true
+                                                coroutineScope.launch {
+                                                    try {
+                                                        SmsHistoryScanner.scanAndSyncInbox(context)
+                                                        CockpitWidget.forceUpdateAll(context)
+                                                    } finally {
+                                                        isRefreshing = false
+                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    }
+                                                }
+                                            } else {
+                                                val perms = mutableListOf(Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS)
+                                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) perms.add(Manifest.permission.POST_NOTIFICATIONS)
+                                                permissionLauncher.launch(perms.toTypedArray())
+                                            }
+                                        },
+                                        state = pullRefreshState,
+                                        modifier = Modifier.fillMaxSize()
+                                    ) {
                                     LazyColumn(
                                         state = dashboardListState,
                                         modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
@@ -296,24 +335,6 @@ class MainActivity : ComponentActivity() {
                                                             .clickable { showCycleHistorySheet = true },
                                                         shape = RoundedCornerShape(12.dp), color = palette.surface, border = BorderStroke(1.dp, palette.cardBorderBrush)
                                                     ) { Box(modifier = Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) { Text("Cycles", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = palette.textPrimary) } }
-                                                    Surface(
-                                                        modifier = Modifier.height(36.dp).shadow(4.dp, RoundedCornerShape(12.dp), ambientColor = palette.heroShadowColor, spotColor = palette.heroShadowColor).clip(RoundedCornerShape(12.dp))
-                                                            .clickable {
-                                                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                                simulatedModeOverride = null
-                                                                if (hasSmsPermission) {
-                                                                    coroutineScope.launch {
-                                                                        SmsHistoryScanner.scanAndSyncInbox(context)
-                                                                        CockpitWidget.forceUpdateAll(context)
-                                                                    }
-                                                                } else {
-                                                                    val perms = mutableListOf(Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS)
-                                                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) perms.add(Manifest.permission.POST_NOTIFICATIONS)
-                                                                    permissionLauncher.launch(perms.toTypedArray())
-                                                                }
-                                                            },
-                                                        shape = RoundedCornerShape(12.dp), color = palette.primaryAccent
-                                                    ) { Box(modifier = Modifier.padding(horizontal = 13.dp), contentAlignment = Alignment.Center) { Text("↻ Sync", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White) } }
                                                 }
                                             }
                                         }
@@ -386,7 +407,7 @@ class MainActivity : ComponentActivity() {
                                                     if (page == 0) {
                                                         Surface(
                                                             modifier = Modifier.fillMaxWidth().height(190.dp).shadow(elevation = 12.dp, shape = RoundedCornerShape(22.dp), ambientColor = palette.heroShadowColor, spotColor = palette.shadowColor).clip(RoundedCornerShape(22.dp)).tactileCardPress { openScreen(ActiveScreen.DEBIT_ANALYTICS) },
-                                                            shape = RoundedCornerShape(22.dp), color = palette.surface.copy(alpha = 0.96f), border = BorderStroke(1.dp, palette.cardBorderBrush)
+                                                            shape = RoundedCornerShape(22.dp), color = palette.surface.copy(alpha = GLASS_ALPHA), border = BorderStroke(1.dp, palette.cardBorderBrush)
                                                         ) {
                                                             Column(modifier = Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.SpaceBetween) {
                                                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -410,7 +431,7 @@ class MainActivity : ComponentActivity() {
                                                     } else {
                                                         Surface(
                                                             modifier = Modifier.fillMaxWidth().height(190.dp).shadow(elevation = 12.dp, shape = RoundedCornerShape(22.dp), ambientColor = palette.heroShadowColor, spotColor = palette.shadowColor).clip(RoundedCornerShape(22.dp)).tactileCardPress { openScreen(ActiveScreen.CREDIT_ANALYTICS) },
-                                                            shape = RoundedCornerShape(22.dp), color = palette.surface.copy(alpha = 0.96f), border = BorderStroke(1.dp, palette.cardBorderBrush)
+                                                            shape = RoundedCornerShape(22.dp), color = palette.surface.copy(alpha = GLASS_ALPHA), border = BorderStroke(1.dp, palette.cardBorderBrush)
                                                         ) {
                                                             Column(modifier = Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.SpaceBetween) {
                                                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -439,7 +460,7 @@ class MainActivity : ComponentActivity() {
                                         item(key = "vault_ledger_card") {
                                             Surface(
                                                 modifier = Modifier.fillMaxWidth().shadow(elevation = 12.dp, shape = RoundedCornerShape(22.dp), ambientColor = palette.heroShadowColor, spotColor = palette.shadowColor).clip(RoundedCornerShape(22.dp)).tactileCardPress { openScreen(ActiveScreen.VAULT_LEDGER) },
-                                                shape = RoundedCornerShape(22.dp), color = palette.surface.copy(alpha = 0.96f), border = BorderStroke(1.dp, palette.cardBorderBrush)
+                                                shape = RoundedCornerShape(22.dp), color = palette.surface.copy(alpha = GLASS_ALPHA), border = BorderStroke(1.dp, palette.cardBorderBrush)
                                             ) {
                                                 Column(modifier = Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -461,6 +482,7 @@ class MainActivity : ComponentActivity() {
                                             item(key = "recent_alerts_header") { Text("Recent Alerts", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = palette.textPrimary, modifier = Modifier.padding(top = 4.dp)) }
                                             items(recentTxns, key = { it.id }) { txn -> TransactionRowCard(txn = txn, onClick = { selectedTxnForEdit = txn }) }
                                         }
+                                    }
                                     }
                                 }
                             }
@@ -653,7 +675,7 @@ fun AccountAnalyticsScreen(isCreditCard: Boolean, title: String, cycleLabel: Str
         item(key = "analytics_donut_card") {
             Surface(
                 modifier = Modifier.fillMaxWidth().shadow(12.dp, RoundedCornerShape(22.dp), ambientColor = palette.heroShadowColor, spotColor = palette.shadowColor).clip(RoundedCornerShape(22.dp)),
-                shape = RoundedCornerShape(22.dp), color = palette.surface.copy(alpha = 0.96f), border = BorderStroke(1.dp, palette.cardBorderBrush)
+                shape = RoundedCornerShape(22.dp), color = palette.surface.copy(alpha = GLASS_ALPHA), border = BorderStroke(1.dp, palette.cardBorderBrush)
             ) {
                 Column(modifier = Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -666,6 +688,23 @@ fun AccountAnalyticsScreen(isCreditCard: Boolean, title: String, cycleLabel: Str
                     }
                     Spacer(modifier = Modifier.height(20.dp))
                     Box(modifier = Modifier.size(180.dp), contentAlignment = Alignment.Center) {
+                        // Animated pie chart morph: the selected slice grows to swallow the full circle,
+                        // the others collapse to 0. States are created here (composable scope), not inside the draw lambda.
+                        val animatedSweeps = categoryBreakdown.map { (tag, amt, _) ->
+                            val baseSweep = if (totalPeriodSpend > 0.0) ((amt / totalPeriodSpend) * 360.0).toFloat() else 0f
+                            val targetSweep = when (selectedCategory) {
+                                null -> (baseSweep - 2.5f).coerceAtLeast(1f)
+                                tag -> 360f
+                                else -> 0f
+                            }
+                            key(tag) {
+                                animateFloatAsState(
+                                    targetValue = targetSweep,
+                                    animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow),
+                                    label = "pie_morph"
+                                )
+                            }
+                        }
                         Canvas(modifier = Modifier.fillMaxSize()) {
                             val strokeWidth = 22.dp.toPx()
                             val diameter = size.minDimension - strokeWidth
@@ -676,13 +715,11 @@ fun AccountAnalyticsScreen(isCreditCard: Boolean, title: String, cycleLabel: Str
                                 drawArc(color = palette.surfaceMuted, startAngle = 0f, sweepAngle = 360f, useCenter = false, topLeft = topLeft, size = arcSize, style = Stroke(width = strokeWidth))
                             } else {
                                 var startAngle = -90f
-                                categoryBreakdown.forEach { (tag, amt, _) ->
+                                categoryBreakdown.forEachIndexed { index, (tag, amt, _) ->
                                     val baseSweep = ((amt / totalPeriodSpend) * 360.0).toFloat()
-                                    // Animated pie chart morph: it sweeps to 360 if selected, shrinks to base if not
-                                    val targetSweep = if (selectedCategory == null) (baseSweep - 2.5f).coerceAtLeast(1f) else if (selectedCategory == tag) 360f else 0f
-                                    val animatedSweep = targetSweep // Simple state for now to ensure compilation stability
-                                    
-                                    if (animatedSweep > 0f) {
+                                    val animatedSweep = animatedSweeps[index].value
+
+                                    if (animatedSweep > 0.5f) {
                                         drawArc(
                                             color = getSubTagSolidColor(tag, palette.isDark),
                                             startAngle = startAngle,
@@ -1009,7 +1046,7 @@ fun VaultItemCard(vault: VaultBalanceEntity, onClick: () -> Unit = {}) {
 
     Surface(
         modifier = Modifier.fillMaxWidth().shadow(12.dp, RoundedCornerShape(18.dp), ambientColor = palette.heroShadowColor, spotColor = palette.shadowColor).clip(RoundedCornerShape(18.dp)).tactileCardPress { onClick() },
-        shape = RoundedCornerShape(18.dp), color = palette.surface.copy(alpha = 0.96f), border = BorderStroke(1.dp, palette.cardBorderBrush)
+        shape = RoundedCornerShape(18.dp), color = palette.surface.copy(alpha = GLASS_ALPHA), border = BorderStroke(1.dp, palette.cardBorderBrush)
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(18.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
