@@ -379,24 +379,33 @@ class MainActivity : ComponentActivity() {
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                Surface(
+                                                    color = Color.Transparent,
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(12.dp))
+                                                        .clickable { showSettingsSheet = true }
+                                                        .padding(end = 8.dp, top = 4.dp, bottom = 4.dp)
                                                 ) {
-                                                    CadenceLogoMark(modifier = Modifier.size(36.dp))
-                                                    Column {
-                                                        Text(
-                                                            text = "Cadence",
-                                                            fontSize = 23.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            letterSpacing = (-0.5).sp,
-                                                            color = palette.textPrimary
-                                                        )
-                                                        Text(
-                                                            text = cycleLabel,
-                                                            fontSize = 11.sp,
-                                                            color = palette.textSecondary
-                                                        )
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                                    ) {
+                                                        CadenceLogoMark(modifier = Modifier.size(40.dp))
+                                                        Column(verticalArrangement = Arrangement.Center) {
+                                                            Text(
+                                                                text = "Cadence",
+                                                                fontSize = 22.sp,
+                                                                fontWeight = FontWeight.ExtraBold,
+                                                                letterSpacing = (-0.5).sp,
+                                                                color = palette.textPrimary
+                                                            )
+                                                            Text(
+                                                                text = cycleLabel,
+                                                                fontSize = 11.sp,
+                                                                fontWeight = FontWeight.Medium,
+                                                                color = palette.textSecondary
+                                                            )
+                                                        }
                                                     }
                                                 }
 
@@ -685,13 +694,13 @@ class MainActivity : ComponentActivity() {
                                                             modifier = Modifier
                                                                 .fillMaxWidth()
                                                                 .height(190.dp)
+                                                                .clip(RoundedCornerShape(22.dp))
                                                                 .shadow(
-                                                                    elevation = 6.dp,
+                                                                    elevation = 12.dp,
                                                                     shape = RoundedCornerShape(22.dp),
-                                                                    ambientColor = palette.shadowColor,
+                                                                    ambientColor = palette.heroShadowColor,
                                                                     spotColor = palette.shadowColor
                                                                 )
-                                                                .clip(RoundedCornerShape(22.dp))
                                                                 .tactileCardPress { openScreen(ActiveScreen.DEBIT_ANALYTICS) },
                                                             shape = RoundedCornerShape(22.dp),
                                                             color = palette.surface,
@@ -800,13 +809,13 @@ class MainActivity : ComponentActivity() {
                                                             modifier = Modifier
                                                                 .fillMaxWidth()
                                                                 .height(190.dp)
+                                                                .clip(RoundedCornerShape(22.dp))
                                                                 .shadow(
-                                                                    elevation = 6.dp,
+                                                                    elevation = 12.dp,
                                                                     shape = RoundedCornerShape(22.dp),
-                                                                    ambientColor = palette.shadowColor,
+                                                                    ambientColor = palette.heroShadowColor,
                                                                     spotColor = palette.shadowColor
                                                                 )
-                                                                .clip(RoundedCornerShape(22.dp))
                                                                 .tactileCardPress { openScreen(ActiveScreen.CREDIT_ANALYTICS) },
                                                             shape = RoundedCornerShape(22.dp),
                                                             color = palette.surface,
@@ -1922,7 +1931,7 @@ fun SettingsBottomSheet(
                                 .clip(RoundedCornerShape(12.dp))
                                 .clickable { onSelectTheme(key) },
                             shape = RoundedCornerShape(12.dp),
-                            color = if (selected) palette.primaryAccent else palette.surfaceMuted
+                            color = if (selected) palette.heroBorderBrush else palette.surfaceMuted
                         ) {
                             Box(
                                 modifier = Modifier.padding(vertical = 11.dp),
@@ -1959,7 +1968,7 @@ fun SettingsBottomSheet(
                                 .clip(RoundedCornerShape(12.dp))
                                 .clickable { onSelectWidgetStyle(key) },
                             shape = RoundedCornerShape(12.dp),
-                            color = if (selected) palette.primaryAccent else palette.surfaceMuted
+                            color = if (selected) palette.heroBorderBrush else palette.surfaceMuted
                         ) {
                             Box(
                                 modifier = Modifier.padding(vertical = 11.dp),
